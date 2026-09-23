@@ -28,9 +28,11 @@ on:
     workflows: [CI]
     types: [completed]
 
-# CI 连续重跑时取消同一目标的旧评审
+# 自动评审按触发的 head_sha 去重（CI 重跑时取消过期的旧评审）；手动 dispatch
+# 用 run_id 独占一组——不能用 github.ref 兜底，否则所有 dispatch 都落在 master
+# 同一组里，后发的评审会把在跑的直接取消（实测：连续 Review #96/#97/#98 互杀）
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.run_id }}
   cancel-in-progress: true
 
 permissions:
