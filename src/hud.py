@@ -13,10 +13,11 @@ Design notes
     resizes and monitor changes without any window-server hooks.
   * The HUD uses native macOS vibrancy with semantic WeChat green/amber/red accents. The
     Appearance stays pinned to Aqua so labels and controls keep the same tested contrast.
-  * 「填入」 writes through the Accessibility API into WeChat's input box (src/fill.py): no
-    synthetic keystrokes, no clipboard, and nothing needs to be frontmost. It needs the
-    Accessibility permission; when that is missing the HUD asks for it and reports the
-    failure.
+  * 「填入」 is dispatched through the per-app adapter layer (src/apps/) into the current
+    chat app's input box (WeChat: Accessibility writes via src/fill.py; QQ: AX value-set
+    with a keyboard-events fallback). No clipboard, and nothing is ever sent. It needs
+    the Accessibility permission; when that is missing the HUD asks for it and reports
+    the failure.
 """
 
 from __future__ import annotations
@@ -67,9 +68,8 @@ import userconfig  # noqa: E402
 
 userconfig.load()   # ~/.config/jev-jarvis/env -> os.environ (Finder apps inherit none)
 
-from perception import (  # noqa: E402
-    frontmost_app_is_wechat, read_conversation, screen_capture_ok,
-    request_screen_capture, warm_ocr)
+from perception import screen_capture_ok, request_screen_capture  # noqa: E402
+from apps.registry import APPS, UNKNOWN, frontmost_app  # noqa: E402  按前台 App 分发（微信 / QQ）
 import judge  # noqa: E402  (model_cached / model_disk_usage: the #38 onboarding + settings)
 from judge import LowMemoryError, ModelNotDownloadedError, make_judge  # noqa: E402
 from generate import BUILTIN_SOURCE, Generator, load_credentials  # noqa: E402
@@ -97,7 +97,7 @@ SETTLE_S = 1.2           # upper bound on the settle wait (anti-flood; unchanged
 EARLY_SETTLE_S = 0.70    # the gate may open this early …
 STABLE_READS = 3         # … but only after this many consecutive unchanged reads
 MIN_GAP_S = 2.0          # never restart analysis faster than this
-IDLE_STATUS = "等待微信消息…"       # the resting status line (also set at build time)
+IDLE_STATUS = "等待微信 / QQ 消息…"   # the resting status line (also set at build time)
 WARM_STATUS = "判断模型加载中…（首次需下载，可能数分钟）"  # shown while judge warm-up runs
 
 
@@ -289,8 +289,9 @@ class HudController(NSObject):
         self._last_risk = 0.0         # newest verdict's risk, for the overlay's highlight
         self._chat_title = ""
         self._asked_permission = False
-        self._win_wid = None          # sticky WeChat window id
-        self._wechat_frontmost = None # foreground boundary; False means capture state is stale
+        self._win_wid = None          # sticky chat window id (per app)
+        self._app = None              # 当前前台聊天应用适配器；None = 不在任何聊天应用前台
+        self._asked_accessibility = False   # QQ 路径的辅助功能授权只弹一次
         self._foreground_epoch = 0    # catches leave+return while one capture is in flight
         self._read_fail_since = None  # debounce transient foreground capture failures
         self._read_fail_hidden = False
@@ -720,7 +721,7 @@ class HudController(NSObject):
         bar = AppKit.NSStatusBar.systemStatusBar()
         self.status_item = bar.statusItemWithLength_(AppKit.NSVariableStatusItemLength)
         self.status_item.button().setTitle_("J")
-        self.status_item.button().setToolTip_("jev-jarvis · 微信意图助手")
+        self.status_item.button().setToolTip_("jev-jarvis · 微信 / QQ 意图助手")
 
         menu = AppKit.NSMenu.alloc().init()
         for title, action, key in (
@@ -1159,7 +1160,7 @@ class HudController(NSObject):
         self._render("status", "已复制", PALETTE["green"])
 
     def fillCandidate_(self, sender):
-        """Write the candidate into WeChat's input box (src/fill.py)."""
+        """Write the candidate into the current chat app's input box (via self._app)."""
         if getattr(self,"_calibration_required",False) and self._input_calibration is None:
             self._render("status", "请点击右上角校准图标，确认消息区和输入区。", PALETTE["amber"])
             return
@@ -1167,10 +1168,15 @@ class HudController(NSObject):
         text = self.cand_texts[idx] if 0 <= idx < len(self.cand_texts) else None
         if not text:
             return
-        # The status line is painted before the call because writing into WeChat takes a
-        # beat; the click should look instant even though the write has not happened yet.
+        # The status line is painted before the call because writing into the chat app
+        # takes a beat; the click should look instant even though the write has not
+        # happened yet.
         self._render("status", "填入中…", PALETTE["muted"])
         self.panel.displayIfNeeded()
+        app = self._app
+        if app is None:
+            self._render("status", "填入失败：微信 / QQ 不在前台", PALETTE["red"])
+            return
         if not fill.has_accessibility():
             # First click is the moment to ask: the system dialog is the only way in.
             fill.request_accessibility()
@@ -1178,7 +1184,12 @@ class HudController(NSObject):
         if target is None or (target["box"] is None and not target.get("visual_rect")):
             self._render("status", "填入失败：" + (target["reason"] if target else "等待输入框定位"), PALETTE["red"])
             return
-        ok, reason = fill.fill_text(text, target=target)
+        if target.get("app") != app.key:
+            # 适配器刚切换、检测框还没更新：目标矩形仍属于上一个 App，写进去会
+            # 填错应用——拒绝并让下一轮 locate_input 刷新目标。
+            self._render("status", "填入失败：输入目标属于另一应用，请等检测框更新后重试", PALETTE["red"])
+            return
+        ok, reason = app.fill_text(text, target=target)
         if ok:
             self._render("status", reason, PALETTE["green"])
         else:
@@ -1381,10 +1392,10 @@ class HudController(NSObject):
         if self._paused:
             self._render("status", "已暂停 · 请先继续读屏", PALETTE["amber"])
             return
-        if self._wechat_frontmost is not True:
+        if self._app is None:
             # The panel floats over every app: clicked from elsewhere this run would be
             # discarded by _reply_current() with no status update to say so — ask here.
-            self._render("status", "微信不在前台 · 回到微信再试", PALETTE["amber"])
+            self._render("status", "微信 / QQ 不在前台 · 回到聊天窗口再试", PALETTE["amber"])
             return
         if self._regenerating:
             self._render("status", "推荐回答生成中…", PALETTE["muted"])
@@ -1511,23 +1522,28 @@ class HudController(NSObject):
             self._model_status = status
             if status:
                 self._show()
-            elif was_live and (self._wechat_frontmost is not True
+            elif was_live and (self._app is None
                                or self._read_fail_hidden):
                 # The load just finished; applyHidden_ kept the panel up while it ran,
                 # so a WeChat that left in the meantime is hidden only now (review #41).
                 # The read-failure latch counts too: the panel was kept past the grace
-                # period only for the download's sake — and `is not True` also covers
+                # period only for the download's sake — and `_app is None` also covers
                 # the pre-first-poll None, where foreground was never established.
                 if self.panel.isVisible():
                     self.panel.orderOut_(None)
             self._render("status", *self._normal_status)
 
-    def _set_foreground_state(self, frontmost):
-        """Apply one hard lifecycle boundary when WeChat gains/loses focus."""
-        if frontmost is None or frontmost is self._wechat_frontmost:
+    def _set_foreground_state(self, app):
+        """Apply one hard lifecycle boundary when a chat app gains/loses focus or changes.
+
+        `app` is an adapter, None (some other app is frontmost — a real leave), or UNKNOWN
+        (the query failed — not evidence of anything, so nothing changes).
+        """
+        if app is UNKNOWN or app is self._app:
             return False
 
-        self._wechat_frontmost = frontmost
+        prev = self._app
+        self._app = app
         self._foreground_epoch += 1
         self._reply_epoch += 1
         self._reply_key = None
@@ -1549,12 +1565,18 @@ class HudController(NSObject):
         self._read_fail_hidden = False
         self._empty_frame_since = None
 
-        if frontmost:
-            self._next_read_ts = 0
-            _log("前台切换 · 微信回到前台，强制重新读屏")
+        if app is None:
+            _log("前台切换 · 聊天应用离开前台，隐藏面板并清空旧结果")
+            self._push("applyForegroundHidden:", "微信 / QQ 不在前台")
         else:
-            _log("前台切换 · 微信离开前台，隐藏面板并清空旧结果")
-            self._push("applyForegroundHidden:", "微信不在前台")
+            self._next_read_ts = 0
+            if prev is not None:
+                # 适配器→适配器（微信→QQ 等）与离开一样是一次硬边界：旧会话与旧候选
+                # 必须下屏，否则点「填入」会把给前一个 App 写的回复填进当前 App。
+                _log(f"前台切换 · 切换到{app.display_name}，清空面板并强制重新读屏")
+                self._push("applyForegroundHidden:", f"已切换到{app.display_name}")
+            else:
+                _log(f"前台切换 · {app.display_name}回到前台，强制重新读屏")
         return True
 
     def tick_(self, timer):
@@ -1566,11 +1588,11 @@ class HudController(NSObject):
         # Check activation before pause/busy/read-cadence gates.  The timer keeps
         # firing while OCR is in flight, so a quick WeChat -> Chrome -> WeChat
         # round trip still advances _foreground_epoch and retires that capture.
-        frontmost_is_wechat = frontmost_app_is_wechat()
-        if frontmost_is_wechat is None:
+        app = frontmost_app()
+        if app is UNKNOWN:
             return
-        self._set_foreground_state(frontmost_is_wechat)
-        if not frontmost_is_wechat:
+        self._set_foreground_state(app)
+        if app is None:
             return
         if self._paused or self._busy or time.time() < self._next_read_ts:
             return  # paused, a previous read is still running, or not due yet
@@ -1591,37 +1613,52 @@ class HudController(NSObject):
         # to reuse the last WeChat frame makes stale text look like browser OCR. Treat app
         # activation as a hard display/capture boundary before even checking permissions:
         # a missing screen grant must not keep an error panel floating over other apps.
-        frontmost_is_wechat = frontmost_app_is_wechat()
-        if frontmost_is_wechat is None:
-            # A transient NSWorkspace failure is not proof that the user left WeChat.
+        app = frontmost_app()
+        if app is UNKNOWN:
+            # A transient NSWorkspace failure is not proof that the user left the chat app.
             # Freeze both reads and UI updates for one short tick without cancelling a
             # valid in-flight reply or manufacturing a leave/return transition.
             self._next_read_ts = time.time() + FAST_TICK
             return
-        self._set_foreground_state(frontmost_is_wechat)
-        if not frontmost_is_wechat:
+        self._set_foreground_state(app)
+        if app is None:
             self._next_read_ts = time.time() + FAST_TICK
             return
-        if not screen_capture_ok():
-            if not self._asked_permission:
-                self._asked_permission = True
-                request_screen_capture()      # opens the system prompt
-            self._push("applyError:", "需要屏幕录制权限 · 系统设置 › 隐私与安全性")
+        if app.needs_screen_capture:
+            if not screen_capture_ok():
+                if not self._asked_permission:
+                    self._asked_permission = True
+                    request_screen_capture()      # opens the system prompt
+                self._push("applyError:", "需要屏幕录制权限 · 系统设置 › 隐私与安全性")
+                self._next_read_ts = time.time() + SLOW_TICK
+                return
+        elif not fill.has_accessibility():
+            # QQ reads the accessibility tree: without the grant there is nothing to read.
+            if not self._asked_accessibility:
+                self._asked_accessibility = True
+                fill.request_accessibility()
+            self._push("applyError:", "需要辅助功能权限 · 系统设置 › 隐私与安全性")
             self._next_read_ts = time.time() + SLOW_TICK
             return
         if getattr(self, "_calibrating", False):
             return
-        if getattr(self, "_calibration_required", False) and self._calibration is None:
+        if (app.needs_screen_capture
+                and getattr(self, "_calibration_required", False)
+                and self._calibration is None):
+            # 校准只约束微信 OCR 路径；QQ 读无障碍树，无消息区可校准。
             self._push("applyWaiting:", "请点击右上角校准图标，确认消息区和输入区。")
             self._next_read_ts = time.time() + SLOW_TICK
             return
         capture_foreground_epoch = self._foreground_epoch
         capture_context_version = self._context_version
         try:
-            extra = {"calibration": self._calibration} if getattr(self,"_calibration",None) else {}
-            res = read_conversation(previous_wid=self._win_wid,
-                                    prev_fingerprint=self._fingerprint,
-                                    prev_layout=getattr(self, "_layout_key", None), **extra)
+            # calibration 只被微信 OCR 路径接受；QQ 适配器签名里没有它，不传。
+            extra = {}
+            if app.needs_screen_capture and getattr(self, "_calibration", None):
+                extra = {"calibration": self._calibration}
+            res = app.read_conversation(previous_wid=self._win_wid,
+                                        prev_fingerprint=self._fingerprint,
+                                        prev_layout=getattr(self, "_layout_key", None), **extra)
         except Exception as e:
             self._push("applyError:", f"读取失败: {type(e).__name__}")
             self._next_read_ts = time.time() + SLOW_TICK
@@ -1638,18 +1675,17 @@ class HudController(NSObject):
             return
         # Re-check after the blocking capture/OCR.  tick_ may have observed a
         # complete leave+return while this worker was busy; in that case even a
-        # currently-frontmost WeChat does not make this old snapshot current.
-        frontmost_is_wechat = frontmost_app_is_wechat()
-        if frontmost_is_wechat is None:
+        # currently-frontmost chat app does not make this old snapshot current.
+        after = frontmost_app()
+        if after is UNKNOWN:
             self._next_read_ts = time.time() + FAST_TICK
             return
-        self._set_foreground_state(frontmost_is_wechat)
-        if (not frontmost_is_wechat
-                or capture_foreground_epoch != self._foreground_epoch):
+        self._set_foreground_state(after)
+        if after is not app or capture_foreground_epoch != self._foreground_epoch:
             self._next_read_ts = time.time() + FAST_TICK
             return
         if not res["ok"]:
-            # Window enumeration/capture can miss one frame while WeChat redraws.
+            # Window enumeration/capture can miss one frame while the chat app redraws.
             # Keep the already-current HUD stable for a short grace period, then
             # hide and force rediscovery if the failure really persists.
             now_mono = time.monotonic()
@@ -1766,8 +1802,11 @@ class HudController(NSObject):
         now_input = time.monotonic()
         if (res["window"] != getattr(self, "_input_window", None)
                 or now_input >= getattr(self, "_input_next", 0)):
-            self._input_target = fill.locate_input(res["window"])
-            if self._input_target["box"] is None:
+            self._input_target = app.locate_input(res["window"])
+            self._input_target["app"] = app.key   # 填入前复核：目标必须属于当前 App
+            if self._input_target["box"] is None and app.needs_screen_capture:
+                # 视觉后备要截图/OCR，只有走屏幕采集的 App（微信）才允许进入；
+                # QQ 的 AX 路径绝不截图——box 为 None 就让它保持 None（填入按钮报原因）。
                 from input_region import locate_visual_input
                 self._input_target["visual_rect"] = (res.get("input_rect")
                                                      or locate_visual_input(res["window"]))
@@ -1804,7 +1843,9 @@ class HudController(NSObject):
             prev_text = thems[-2].text if len(thems) > 1 else ""
 
             context = self._context_text(msgs, newest) if newest else None
-            key = (res.get("chat_title") or "", newest.text, context, tuple(visible)) if newest else None
+            # key 带 app.key：不同 App 的同名会话 / 同文消息不得共用一条回复纪元
+            key = (app.key, res.get("chat_title") or "", newest.text, context,
+                   tuple(visible)) if newest else None
             self._active_context = context
             if key != self._reply_key:
                 self._reply_epoch += 1
@@ -2279,7 +2320,7 @@ class HudController(NSObject):
     @objc.python_method
     def _reply_current(self):
         self.reload_conversations()
-        return (self._wechat_frontmost is True
+        return (self._app is not None
                 and self._reply_key is not None and not self._paused
                 and getattr(self._reply_worker, "epoch", self._reply_epoch) == self._reply_epoch)
 
@@ -2291,7 +2332,7 @@ class HudController(NSObject):
     def applyReplyUpdate_(self, update):
         self.reload_conversations()
         epoch, selector, payload = update
-        if self._wechat_frontmost is not True or epoch != self._reply_epoch:
+        if self._app is None or epoch != self._reply_epoch:
             return
         if selector not in {"applyWaiting:", "applyError:"} and not self._reply_current():
             return
@@ -2425,12 +2466,13 @@ class HudController(NSObject):
 
         The warm-up is not a reply run — a message that starts analysing while it
         fails must not be able to swallow this line like it swallows late results.
-        It is still a global panel, though: with WeChat in the background the red
+        It is still a global panel, though: with the chat app in the background the red
         line must not surface over other apps (the foreground boundary stays hard).
         The hint is not lost — every later analysis that hits LowMemoryError reports
-        it again through the epoch-guarded applyError_ path, which WeChat foregrounds.
+        it again through the epoch-guarded applyError_ path, which the chat app
+        foregrounds.
         """
-        if self._wechat_frontmost is not True:
+        if self._app is None:
             return
         self._show()                       # never vanish without telling the user why
         self._render("status", text, PALETTE["red"])
@@ -2465,14 +2507,14 @@ class HudController(NSObject):
         self.applyHidden_(reason)
 
     def applyPosition_(self, win):
-        if getattr(self,"_calibrating",False) or self._wechat_frontmost is not True:
+        if self._app is None or getattr(self, "_calibrating", False):
             return
         self._position_near(win)
 
     # --- YOLO overlay callbacks (visual only; see _build_overlay)
     def applyBoxes_(self, payload):
         """Repaint the overlay from the last read's window geometry + messages."""
-        if getattr(self,"_calibrating",False) or self._wechat_frontmost is not True or not self._show_boxes:
+        if self._app is None or getattr(self, "_calibrating", False) or not self._show_boxes:
             return
         win, msgs, newest_text = payload
         W, H = win["w"], win["h"]
@@ -2543,6 +2585,19 @@ class HudController(NSObject):
 
     # --------------------------------------------------------------- warm-up
     @objc.python_method
+    def _warm_apps(self):
+        """Pay each chat app's one-off read-path load (Vision for WeChat; QQ has none)."""
+        for app in APPS:
+            ms = app.warm()
+            if ms is None:
+                continue                  # QQ：AX 路径没有一次性加载
+            if ms >= 0:
+                self._read_once = True    # Vision's one-off load is paid; first read is steady-state
+                _log(f"预热 {app.display_name} 读屏就绪 · {ms:.0f}ms")
+            else:
+                _log(f"预热 {app.display_name} 读屏失败 · 首次读屏会稍慢，不影响使用")
+
+    @objc.python_method
     def _warm(self):
         """Pay the one-off loads in the background: Vision OCR first, then the judge model.
 
@@ -2551,15 +2606,10 @@ class HudController(NSObject):
         launch, moves them to idle time — the fast one first so it is ready within a
         second, the slow one after. If a message does land mid-warm-up nothing breaks:
         its judge() blocks on the model's load lock until the warm-up finishes, and the
-        OCR warm-up is independent of WeChat entirely (a blank canvas, not a window).
+        OCR warm-up is independent of the chat app entirely (a blank canvas, not a window).
         """
         t0 = time.perf_counter()
-        ocr_ms = warm_ocr()
-        if ocr_ms >= 0:
-            self._read_once = True    # Vision's one-off load is paid; first read is steady-state
-            _log(f"预热 OCR 就绪 · {ocr_ms:.0f}ms")
-        else:
-            _log("预热 OCR 失败 · 首次读屏会稍慢，不影响使用")
+        self._warm_apps()
 
         # #37: the first decider-2b load can take minutes (download included) or die to
         # memory pressure — both used to look identical from outside: a silent panel.
