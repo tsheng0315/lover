@@ -126,6 +126,10 @@ jobs:
         # 且非 PR 触发的场景由上方 step if 挡住，走不到这里。
         with:
           prompt: ${{ inputs.prompt }}
+          # disabled：服务端 run 前用 App 身份发的「Leaping into action...」开工评论
+          # 不再被 action 在评审提交时删掉（默认 enabled 会删，页面上显示为
+          # github-actions 删了 pullfrog 的评论）；代价是丢进度评论里的实时任务清单
+          progress_comments: disabled
         env:
           GH_TOKEN: ${{ github.token }}
           # 不放 provider key：凭据由 Pullfrog 服务端持有（见文件头「凭据模型」）
