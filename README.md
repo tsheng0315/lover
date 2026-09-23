@@ -145,9 +145,14 @@ chmod 600 ~/.config/jev-jarvis/env
 - 打包 `./packaging/build_app.sh`；发版 `./packaging/release.sh --publish`（干净 worktree 构建 + 解压回验 + gh release）。版本号只有 `pyproject.toml` 一处；有开发者证书可加 `--sign "Developer ID Application: ..."`
 - 架构一句话：微信在前台时，进程内抓其窗口 → Vision OCR（只扫聊天区）→ 本地 decider-2b 出意图/风险 → LLM 并发出候选 → 本地排序 → 悬浮窗 NSPanel。底层仍按窗口 ID 抓取而不是全屏截图，悬浮窗不污染 OCR
 
-## 许可与免责
+## 版权与许可
 
-MIT（见 `LICENSE`）。只读**你自己屏幕上、你自己账号的**聊天内容，不注入、不 hook、不解密数据库、不自动发送任何消息。请在自己设备上自用；装到别人机器上读别人的聊天记录是另一回事，本项目不为那种用法背书。微信改版可能导致布局识别失效，请遵守微信软件许可协议。
+Copyright © 2026 Finderchangchang 与 jev-chat 贡献者。代码以 MIT 协议开源，另见 [NOTICE](NOTICE)。
+
+- **可以商用**：个人和公司都可以使用、修改、再分发，或集成进自己的产品，不需要付费或事先授权。
+- **必须注明出处**：分发或商用时保留 `LICENSE` 与 `NOTICE`，并在产品「关于」页、说明文档或发布页写明来源。推荐写法：基于 Jev 聊天助手（https://github.com/jev-chat/jev-chat-jarvis-mac）二次开发。
+- **不要用**「Jev 聊天助手」「jev-chat」名称或 chatjevs.com 域名暗示由原作者出品或背书。
+- **免责声明**：本项目只处理你自己设备上、你自己有权查看的聊天，不注入、不 hook、不解密数据库、不自动发送任何消息。请遵守微信、QQ、X、飞书等各软件的许可协议与当地法律法规，作者不对使用后果负责。
 
 ## 交流反馈
 
@@ -170,5 +175,11 @@ MIT（见 `LICENSE`）。只读**你自己屏幕上、你自己账号的**聊天
     <td align="center"><img src="docs/wechat-mp-qr.png" width="200" alt="扫码关注公众号"><br><sub>公众号</sub></td>
   </tr>
 </table>
+
+## ☕ 请我喝杯咖啡
+
+如果你觉得我写的这玩意儿对你有点帮助，欢迎请我喝杯咖啡。咖啡因一到位，脑子就开始冒泡，源源不断地驱动我往前跑；哪天我更新得特别勤，说明这杯续上了 😄
+
+<p align="center"><img src="docs/sponsor-qr.png" width="260" alt="微信赞赏码"></p>
 
 **隐私与数据流向**详见 [PRIVACY.md](PRIVACY.md)：聊天内容只发给模型服务商——推荐自配 API key 或本地 Ollama；内置免费通道经作者中转，承诺与提醒见该页。
