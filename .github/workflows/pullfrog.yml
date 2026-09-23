@@ -133,6 +133,11 @@ jobs:
             echo "::error::workflow_dispatch 需要填 prompt（或用于自动评审触发）"
             exit 1
           fi
+          # 输出语言硬性收敛到中文：App「Review」按钮派发的内置 prompt 是英文的，
+          # 模型不约束就会飘英文——评审没人看的英文等于没评
+          P="${P}
+
+          输出要求：评审意见、分级结论、提交到 PR 的评论全部使用简体中文。"
           {
             echo "PROMPT<<PROMPT_EOF"
             echo "$P"
