@@ -478,6 +478,19 @@ class FallbackJudge:
     def load_status(self):
         return self.local.load_status if self.local is not None else None
 
+    @property
+    def backend_label(self) -> str:
+        """Name for log lines: the live Jev router URL, else the local model's short name.
+
+        The ranking log used to hardcode 本地模型 even while ranking rode the cloud
+        primary — rank_candidates prefers it exactly like judge() does — which read as
+        "Jev 没生效" to anyone debugging the panel from the log alone.
+        """
+        if not self.fell_back:
+            return f"Jev {self.primary.base}"
+        return ("本地 decider-2b，一次前向" if self.local is None
+                else f"本地 {self.local.repo.split('/')[-1]}，一次前向")
+
     def _fallback(self):
         if self.local is None:
             self.local = Judge()

@@ -1861,7 +1861,8 @@ class HudController(NSObject):
         ranked = self._rank_payload(payload, newest.text, intent) if intent else payload
         rank_ms = (time.perf_counter() - t_rank) * 1000
         if intent:
-            _log(f"排序 {rank_ms:.0f}ms（本地模型，一次前向）")
+            backend = getattr(self.judge, "backend_label", "本地 decider-2b，一次前向")
+            _log(f"排序 {rank_ms:.0f}ms（{backend}）")
         _log(f"端到端 {(time.perf_counter() - t0) * 1000:.0f}ms"
              f" · 从分析开始到候选上屏")
         self._push("applyCandidates:", ranked)
