@@ -92,7 +92,7 @@ class DownloadGateTests(unittest.TestCase):
 
     def test_skip_blocks_uncached_model(self):
         session_override("JUDGE_BACKEND", "skip")
-        self.assertIn("7 GB", self._gate())
+        self.assertIn("3.8 GB", self._gate())
 
 
 class SettingsWriteTests(unittest.TestCase):
