@@ -6,6 +6,7 @@ No Cocoa, no screen read, no model calls; `block()` comes from tests/support_hud
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
@@ -62,6 +63,40 @@ class PerceptionTests(unittest.TestCase):
         self.assertEqual(messages[0].side, 'them')
         self.assertEqual(messages[0].sender, '小王')
         self.assertEqual(len(messages[0].lines), 2)
+
+    def test_calibrated_timing_carries_upstream_capture(self):
+        # #110: read_calibrated receives pixels the caller already paid for; its
+        # timing must carry that capture cost, not report 抓取 0ms in the read log.
+        from calibration import Calibration
+        import perception
+        cal = Calibration(600, 600, 120, 60, 450, 480)
+        win = {'wid': 1, 'w': 600, 'h': 600, 'x': 0, 'y': 0}
+        with patch('perception.ocr_image', return_value=[]), \
+                patch('calibrated_messages.recover_numeric_bubbles', return_value=[]), \
+                patch('calibrated_messages.extract', return_value=[]):
+            res = perception.read_calibrated(object(), cal, win, capture_ms=123.0)
+        t = res['timing_ms']
+        self.assertEqual(t['capture'], 123.0)
+        self.assertAlmostEqual(t['total'], 123.0 + t['ocr'], places=6)
+        self.assertEqual(t['capture_path'], 'manual')
+
+    def test_read_conversation_passes_capture_cost_to_calibrated(self):
+        # #110: the calibrated branch must forward the capture-side wall time so the
+        # read log reports real capture cost — this covers the wiring itself.
+        from types import SimpleNamespace
+        from calibration import Calibration
+        import perception
+        cal = Calibration(600, 600, 120, 60, 450, 480)
+        win = SimpleNamespace(wid=1, title='t', w=600, h=600, x=0, y=0)
+        with patch.object(perception, 'find_wechat_window', return_value=win), \
+                patch.object(perception, 'capture_window', return_value=True), \
+                patch.object(perception, '_load_png_image', return_value=object()), \
+                patch.object(perception, 'read_calibrated', return_value={'ok': True}) as rc:
+            res = perception.read_conversation(calibration=cal)
+        self.assertEqual(res, {'ok': True})
+        self.assertGreaterEqual(rc.call_args.kwargs['capture_ms'], 0.0)
+        self.assertLess(rc.call_args.kwargs['capture_ms'], 1000.0)
+        self.assertEqual(rc.call_args.args[2]['wid'], 1)
 
 
 if __name__ == '__main__':
