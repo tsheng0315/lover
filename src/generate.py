@@ -152,14 +152,20 @@ PROMPT_ONE = """刚收到一条微信消息，你要帮我回。
 
 {context_line}消息：「{message}」
 {intent_line}
-请写 {n} 条回复候选，语气统一成下面这一种，但两条的胆量要有差别：
+请写 {n} 条回复候选，语气统一成下面这一种：
 「{tone}」{instruction}
 
 硬性要求：
-- 前一条稳妥、可以直接发出去；后一条把这个语气做足，更皮、更夸张一点也行
+- {variation}
 - 每条不超过 30 个字，是微信里打字的语气，不要客套话、不要解释
 - 只输出 {n} 行，每行一条，不要编号、不要引号、不要任何前后缀
 - 不要写出语气名称（不要写「{tone}：」这类前缀），直接从回复内容开始"""
+
+
+def _variation_instruction(count: int) -> str:
+    if count == 1:
+        return "只写一条稳妥、可以直接发出去的回复"
+    return "前一条稳妥、可以直接发出去；最后一条把这个语气做足，更皮、更夸张一点也行"
 
 
 # The model is told not to label its lines, and usually complies — but "usually" is exactly
@@ -539,7 +545,8 @@ class Generator:
         prompt = PROMPT_ONE.format(message=message, context_line=context_line,
                                    intent_line=intent_line,
                                    n=styles.PER_TONE, tone=tone,
-                                   instruction=styles.PRESETS[tone])
+                                   instruction=styles.PRESETS[tone],
+                                   variation=_variation_instruction(styles.PER_TONE))
         emitted = 0
         buf = ""                 # fragments since the last newline
 

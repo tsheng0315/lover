@@ -19,6 +19,19 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/jev-jarvis.app"
 BUNDLE_ID="info.jevjarvis.app"
 
+# Every local install must include and exercise the capture recovery regressions.
+# Run before replacing the previous build so a failed check leaves it intact.
+echo "==> 抓图恢复与 HUD 回归检查"
+test -f "$ROOT/tests/test_capture_recovery.py"
+if [ -n "${JEV_TEST_PYTHON:-}" ]; then
+    "$JEV_TEST_PYTHON" -B -m unittest discover -s "$ROOT/tests"
+elif [ -x "$ROOT/.venv/bin/python" ]; then
+    "$ROOT/.venv/bin/python" -B -m unittest discover -s "$ROOT/tests"
+else
+    uv run --directory "$ROOT" --frozen python -B -m unittest discover -s "$ROOT/tests"
+fi
+BUILD_REVISION="$(git -C "$ROOT" rev-parse --short HEAD)"
+
 # the version has exactly one home: pyproject.toml
 VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$ROOT/pyproject.toml" | head -1)"
 if [ -z "$VERSION" ]; then
@@ -59,6 +72,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDisplayName</key>       <string>jev-chat-jarvis</string>
     <key>CFBundleIdentifier</key>        <string>${BUNDLE_ID}</string>
     <key>CFBundleVersion</key>           <string>${VERSION}</string>
+    <key>JEVBuildRevision</key>          <string>${BUILD_REVISION}</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
     <key>CFBundleExecutable</key>        <string>jev-jarvis</string>

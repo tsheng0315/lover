@@ -22,7 +22,8 @@
 ## 它能做什么
 
 - **意图 + 风险**：8 类意图零样本 **86.4%**（22 条回归口径），风险 0–9 分级 + 行动建议，本地模型一次前向出全分布
-- **候选回复**：内置 11 种话术并发生成（每条一稳一放各出 2 条）→ 先上屏 → 本地模型排序后原位重排；换话术立刻按当前消息重新生成
+- **候选回复**：内置 11 种话术并发生成（每种话术候选数 1—5 条可配置，默认 2 条）→ 先上屏 → 本地模型排序后原位重排；换话术立刻按当前消息重新生成
+- **窗口层级**：状态栏菜单「固定在最前面」可即时切换悬浮窗是否盖在其他窗口上，默认开启；关闭后微信和其他窗口可以盖住面板
 - **快**：消息一出现判断 + 生成同时起跑，M1 Pro 出意图 ~1.5 s、出候选 ~1.5–2 s（端到端为机制推算口径，以日志实测为准）
 - **YOLO 检测框**（可选，`JEV_BOXES=1` 启动即开、菜单栏可切）：OCR 命中的消息实时框在微信窗口上，对方/我分色 + 置信度
 
@@ -100,6 +101,7 @@ uv run python probe/bootstrap_regression.py      # 两种启动入口的离线�
 - API 格式由密钥组决定：`OPENAI_*` 使用 OpenAI 格式，`ANTHROPIC_*` 使用 Anthropic 格式；自定义地址不需要包含服务名称。Ollama 可填 `http://localhost:11434/v1`、密钥 `ollama`，模型从本地服务获取或手填。Jev 地址带不带末尾 `/v1` 都行，与手动配置共用同一条拼接规则。
 - 钥匙串：不新增钥匙串读写。如果原 env 用 `$(security find-generic-password …)` 等 shell 表达式提供密钥，窗口不执行表达式、不展示其内容，未输入新密钥时保留原行；仍由已有启动器执行。要在窗口测试该服务，需明确输入密钥；保存将用输入值替换原表达式。外部注入的密钥继续遵循环境变量优先级。
 - `JEV_BOXES`、`JEV_TONES`、`OPENAI_EXTRA_BODY` 暂仍通过 env 配置，保存窗口不会改动它们。OpenAI 连接测试沿用当前启动的 `OPENAI_EXTRA_BODY`；完整话术管理等留待后续扩展。
+- 生成设置里的「每种话术候选数」可选 1—5 条，默认 2 条；它作用于 OpenAI/Anthropic 两种生成格式，保存后重启生效，也可用 `JEV_CANDIDATES_PER_TONE` 配置。
 
 也可继续手动编辑：
 
@@ -188,7 +190,7 @@ chmod 600 ~/.config/jev-jarvis/env
 - **贡献前必读**：[CONTRIBUTING.md](CONTRIBUTING.md)——动代码前先在 issue 认领（评论 + assignee），分层自测改哪层跑哪层
 - 配置界面自测：`uv run python -B -m unittest discover -s tests`；macOS 原生窗口与按钮流程：`uv run python -B probe/settings_smoke.py`（临时配置 + 本地测试服务，不使用个人密钥）。
 - 打包 `./packaging/build_app.sh`；发版 `./packaging/release.sh --publish`（干净 worktree 构建 + 解压回验 + gh release）。版本号只有 `pyproject.toml` 一处；有开发者证书可加 `--sign "Developer ID Application: ..."`
-- 架构一句话：微信在前台时，进程内抓其窗口 → Vision OCR（只扫聊天区）；QQ 在前台时，读其无障碍树 → 同一条管线：本地 decider-2b 出意图/风险 → LLM 并发出候选 → 本地排序 → 悬浮窗 NSPanel。底层仍按窗口 ID 抓取而不是全屏截图，悬浮窗不污染 OCR
+- 架构一句话：微信在前台时，通过带超时的 `screencapture` 子进程抓其窗口 → Vision OCR（只扫聊天区）；QQ 在前台时，读其无障碍树 → 同一条管线：本地 decider-2b 出意图/风险 → LLM 并发出候选 → 本地排序 → 悬浮窗 NSPanel。底层仍按窗口 ID 抓取而不是全屏截图，悬浮窗不污染 OCR
 
 ## 版权与许可
 

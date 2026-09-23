@@ -11,6 +11,7 @@ from Foundation import NSObject, NSMakeRect
 
 import builtin
 import judge
+import styles
 import userconfig
 import settings_config as config
 import ui_style
@@ -115,10 +116,27 @@ class SettingsController(NSObject):
                 self.initial[f"{prefix}_{name}"] = value
                 self.controls.append(field)
             self.fields[prefix] = fields
-            hint = ("Jev 地址带不带 /v1 都行，网关动作不同时可填完整动作路径；列表接口不可用时可手填模型。" if prefix == "TYPESAFE"
-                    else "可手填模型。Ollama 地址通常含 /v1，密钥可填 ollama。" if prefix == "OPENAI"
-                    else "使用 Anthropic 消息接口，支持自定义兼容服务地址。")
-            self.label(panel, hint, 26, 43, 638, 20, 11, PALETTE["muted"])
+            if prefix == "OPENAI":
+                self.label(panel, "每种话术候选数", 26, 43, 138, 20, 11, PALETTE["text"])
+                self.candidate_count = A.NSPopUpButton.alloc().initWithFrame_pullsDown_(
+                    NSMakeRect(170, 39, 78, 28), False)
+                self.candidate_count.addItemsWithTitles_([
+                    str(value) for value in range(styles.MIN_PER_TONE, styles.MAX_PER_TONE + 1)])
+                self.candidate_count.selectItemWithTitle_(str(styles.PER_TONE))
+                self.candidate_count.setAccessibilityLabel_("每种话术候选数，1 到 5 条")
+                self.candidate_count.setToolTip_("每种话术生成的候选回复条数；保存后重启生效。")
+                self.candidate_count.setTarget_(self)
+                self.candidate_count.setAction_("candidateCountChanged:")
+                panel.addSubview_(self.candidate_count)
+                self.label(panel, "条（保存后重启生效）", 258, 43, 170, 20, 11, PALETTE["muted"])
+                self.initial["JEV_CANDIDATES_PER_TONE"] = str(styles.PER_TONE)
+                if userconfig.source_of("JEV_CANDIDATES_PER_TONE") == "环境变量":
+                    self.candidate_count.setEnabled_(False)
+                    self.candidate_count.setToolTip_("由启动环境变量控制；修改环境变量后重启。")
+            else:
+                hint = ("Jev 地址带不带 /v1 都行，网关动作不同时可填完整动作路径；列表接口不可用时可手填模型。" if prefix == "TYPESAFE"
+                        else "使用 Anthropic 消息接口，支持自定义兼容服务地址。")
+                self.label(panel, hint, 26, 43, 638, 20, 11, PALETTE["muted"])
             for text, action, x in (("获取模型列表", "fetchModels:", 372), ("测试连接", "testConnection:", 524)):
                 button = self.button(panel, text, action, x, 4, 140)
                 button.setTag_(index)
@@ -290,6 +308,9 @@ class SettingsController(NSObject):
 
     def contextControlChanged_(self, sender):
         self.set_status("会话记录与背景已修改，点击「保存配置」后生效。")
+
+    def candidateCountChanged_(self, sender):
+        self.set_status("候选数量已修改，点击「保存配置」后重启生效。")
 
     def textDidChange_(self, notification):
         self.contextControlChanged_(None)
@@ -470,6 +491,8 @@ class SettingsController(NSObject):
             values["JEV_HISTORY"] = "1" if self.history_switch.state() == A.NSOnState else "0"
         if self.context_count.isEnabled():
             values["JEV_CONTEXT_MESSAGES"] = str(self.context_count.stringValue()).strip()
+        if self.candidate_count.isEnabled():
+            values["JEV_CANDIDATES_PER_TONE"] = str(self.candidate_count.titleOfSelectedItem())
         return {k: v for k, v in values.items() if v != self.initial[k]}
 
     def controlTextDidChange_(self, notification):

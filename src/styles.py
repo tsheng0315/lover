@@ -19,12 +19,35 @@ import userconfig
 # dropdowns; the panel's candidate area is built for this many rows.
 MAX_SLOTS = 3
 
-# Candidates per tone. Each tone gets its own request (they run concurrently), and the 2
-# replies in one response are the same voice at two different levels of nerve: the first
-# stays sendable as-is, the second leans into the persona (see PROMPT_ONE in generate.py).
-# A tone asked for twice in one prompt tends to bleed into itself, which is why one tone
-# equals one request.
-PER_TONE = 2
+# Candidates per tone. Each tone gets its own request (they run concurrently), and the
+# replies in one response are the same voice at different levels of nerve. The setting is
+# read once at startup so the HUD, prompt and parser all use the same row count.
+DEFAULT_PER_TONE = 2
+MIN_PER_TONE = 1
+MAX_PER_TONE = 5
+
+
+def candidate_count(raw: str | None) -> int:
+    """Return a safe candidate count, falling back for malformed startup config."""
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_PER_TONE
+    return value if MIN_PER_TONE <= value <= MAX_PER_TONE else DEFAULT_PER_TONE
+
+
+def validate_candidate_count(raw: str) -> int:
+    """Validate a value written by the settings UI, with a user-facing error."""
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise ValueError("每种话术候选数必须是 1 到 5 的整数") from None
+    if not MIN_PER_TONE <= value <= MAX_PER_TONE:
+        raise ValueError("每种话术候选数必须是 1 到 5 的整数")
+    return value
+
+
+PER_TONE = candidate_count(userconfig.get("JEV_CANDIDATES_PER_TONE"))
 
 # label -> instruction. Order here is the order shown in the dropdowns.
 #

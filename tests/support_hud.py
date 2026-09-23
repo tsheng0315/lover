@@ -31,7 +31,7 @@ def hud_harness():
              '_prejudge_loop', '_pregen_loop', '_analyze', '_run_generation', 'reload_conversations',
              '_context_changed', 'save_background', 'configure_context', 'clear_history',
              '_regen_work', '_regenerate_work', 'regenerateReply_', '_rank_payload', '_payload_from_gen',
-             'fillCandidate_', '_warm', '_warm_apps'}
+             'fillCandidate_', '_warm', '_warm_apps', 'toggleAlwaysOnTop_'}
     methods = [n for n in source.body if isinstance(n, ast.FunctionDef) and n.name in names]
     for method in methods:
         method.decorator_list = []
@@ -47,6 +47,8 @@ def hud_harness():
              'fill': SimpleNamespace(locate_input=locate, has_accessibility=Mock(return_value=True),
                                      request_accessibility=Mock()),
              'time': time, 'threading': threading, '_log': lambda *_: None,
+             'AppKit': SimpleNamespace(NSFloatingWindowLevel=3, NSNormalWindowLevel=0,
+                                       NSOnState=1, NSOffState=0),
              'frontmost_app': Mock(return_value=fake_app), 'FAKE_APP': fake_app, 'UNKNOWN': UNKNOWN,
              'APPS': (fake_app,),
              'screen_capture_ok': Mock(return_value=True), 'request_screen_capture': Mock(),

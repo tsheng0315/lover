@@ -101,6 +101,45 @@ class HudReplyTests(unittest.TestCase):
     def incoming(self):
         self.read([block('下午开会', .40, .70, .15)])
 
+    def test_always_on_top_toggle_changes_window_level_and_menu_state(self):
+        self.h.panel = Mock()
+        self.h.always_on_top_item = Mock()
+        self.h._always_on_top = True
+
+        self.h.toggleAlwaysOnTop_(None)
+
+        self.assertFalse(self.h._always_on_top)
+        self.h.panel.setLevel_.assert_called_once_with(HUD['AppKit'].NSNormalWindowLevel)
+        self.h.always_on_top_item.setState_.assert_called_once_with(HUD['AppKit'].NSOffState)
+
+        self.h.toggleAlwaysOnTop_(None)
+
+        self.assertTrue(self.h._always_on_top)
+        self.assertEqual(self.h.panel.setLevel_.call_args_list[-1].args,
+                         (HUD['AppKit'].NSFloatingWindowLevel,))
+        self.assertEqual(self.h.always_on_top_item.setState_.call_args_list[-1].args,
+                         (HUD['AppKit'].NSOnState,))
+
+    def test_transient_missing_input_target_does_not_abort_read(self):
+        HUD['fill'].locate_input.return_value = None
+        self.incoming()
+        self.assertIsInstance(self.h._input_target, dict)
+        self.assertIsNone(self.h._input_target['box'])
+        self.assertEqual(self.h._reply_key[:3], ('wechat', 'chat', '下午开会'))
+
+    def test_foreground_change_during_input_signature_discards_read(self):
+        def switch_foreground(*args):
+            self.h._set_foreground_state(None)
+            return 'stale-signature'
+
+        with patch.object(HUD['fill'], 'locate_input', return_value={'box': None}), \
+             patch('input_region.locate_visual_input', return_value=(1, 2, 3, 4)), \
+             patch('visual_fill.chat_signature', side_effect=switch_foreground):
+            self.incoming()
+        self.assertIsNone(self.h._input_target)
+        self.assertIsNone(self.h._reply_key)
+        self.assertIsNone(self.h._pregen_req)
+
     def test_switch_short_titles_with_same_message_invalidates_old_reply(self):
         titles = [extract_chat_title([block(name, .40, .94, .10, .025)])
                   for name in ('张三', '李经理')]

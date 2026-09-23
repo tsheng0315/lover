@@ -36,6 +36,11 @@ USERNAME_H_MAX = 0.026   # sender-name lines render smaller than bubble text
 MESSAGE_H_MIN = 0.028
 MIN_TEXT_LEN = 1
 
+# `CGWindowListCreateImage` can wait forever inside macOS ScreenCaptureKit. Use
+# a separate process for the production path so the timeout can actually kill
+# the blocked native call instead of leaving a stuck thread in the HUD process.
+SUBPROCESS_CAPTURE_TIMEOUT_S = 3.0
+
 
 @dataclass
 class TextBlock:
@@ -198,10 +203,24 @@ def find_wechat_window(previous_wid: int | None = None) -> WindowInfo | None:
     return best
 
 
-def capture_window(wid: int, out: Path) -> bool:
-    p = subprocess.run(["screencapture", "-x", "-o", "-l", str(wid), str(out)],
-                       capture_output=True, text=True)
+def capture_window(wid: int, out: Path,
+                   timeout_s: float = SUBPROCESS_CAPTURE_TIMEOUT_S) -> bool:
+    try:
+        p = subprocess.run(["screencapture", "-x", "-o", "-l", str(wid), str(out)],
+                           capture_output=True, text=True, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return False
     return p.returncode == 0 and out.exists() and out.stat().st_size > 1000
+
+
+def _load_png_image(path: Path):
+    """Load a PNG into an independent CGImage before its temporary file disappears."""
+    from Foundation import NSData
+
+    data = NSData.dataWithContentsOfFile_(str(path))
+    source = Quartz.CGImageSourceCreateWithData(data, None) if data else None
+    image = Quartz.CGImageSourceCreateImageAtIndex(source, 0, None) if source else None
+    return Quartz.CGImageCreateCopy(image) if image is not None else None
 
 
 # ----------------------------------------------------------------------------- ocr
@@ -269,7 +288,8 @@ def ocr(path: Path, languages=("zh-Hans",), chat_only: bool = True, input_top=No
     Language correction stays ON (it costs ~30 ms more): it is what repairs ordinary OCR
     slips such as 记亿力 for 记忆力, and one wrong character changes what the judge reads.
 
-    This is the fallback path; read_conversation() prefers the in-memory one.
+    This is the file-based OCR helper; production capture uses the same subprocess-backed
+    image source before handing pixels to Vision.
     """
     import Vision
     from Foundation import NSURL
@@ -280,33 +300,19 @@ def ocr(path: Path, languages=("zh-Hans",), chat_only: bool = True, input_top=No
 
 
 def capture_image(wid: int, nominal: bool = True):
-    """The window's pixels as a CGImage, without leaving the process. None when refused.
+    """Return a window image without calling cancellable-in-no-way CoreGraphics APIs.
 
-    Against `screencapture -l <wid>` writing a PNG, this is 4–29 ms versus 128–270 ms for the
-    same window with identical recognition results (10 blocks, same text) — the difference
-    being a subprocess spawn plus PNG encoding plus reading it back off disk. The capture
-    runs every second, so when it works the saving is continuous.
-
-    nominal=True captures at 1x instead of the default retina 2x: Vision's cost scales
-    with pixel count, and chat text at 1x is still ~15 px tall — measured on rendered
-    Chinese lines, recognition is identical block-for-block while OCR time roughly halves.
-    The layout constants are all normalized, so nothing downstream notices the resolution.
-    If a macOS update ever refuses the flag and returns NULL, read_conversation() falls
-    back to the subprocess route and the log says so — degraded to the old behaviour,
-    never broken.
-
-    It does NOT always work: the same call returns NULL once the display is asleep, while
-    `screencapture` keeps producing images. So callers must treat None as "use the slow
-    route" rather than an error — read_conversation() does exactly that, and reports which
-    route it took so a permanent fallback is visible instead of just feeling slow.
+    ``nominal`` is retained for call-site compatibility. The production path deliberately
+    uses the timed subprocess route for every caller: a Python thread cannot cancel
+    ``CGWindowListCreateImage`` after macOS enters ScreenCaptureKit, while this subprocess
+    can be terminated by ``capture_window`` when the system capture service stalls.
     """
-    import Quartz
     try:
-        opts = Quartz.kCGWindowImageBoundsIgnoreFraming
-        if nominal:
-            opts |= Quartz.kCGWindowImageNominalResolution
-        return Quartz.CGWindowListCreateImage(
-            Quartz.CGRectNull, Quartz.kCGWindowListOptionIncludingWindow, wid, opts)
+        with tempfile.TemporaryDirectory() as td:
+            png = Path(td) / "wechat.png"
+            if not capture_window(wid, png):
+                return None
+            return _load_png_image(png)
     except Exception:
         return None
 
@@ -604,11 +610,11 @@ def read_conversation(max_messages: int = 12, previous_wid: int | None = None,
     if win is None:
         return {"ok": False, "error": "WeChat main window not found", "messages": []}
 
-    # In-process capture + OCR off the CGImage is the fast path (~250 ms for the pair).
-    # The subprocess + PNG route stays as the fallback: it is ~150 ms slower, but it is the
-    # one that still worked when CGWindowListCreateImage had nothing to give.
-    image = capture_image(win.wid)
-    capture_path = "memory" if image is not None else "subprocess"
+    # Always use the subprocess path in production. A Python thread cannot cancel
+    # CGWindowListCreateImage once macOS enters ScreenCaptureKit, while a timed
+    # subprocess can be terminated and the HUD worker remains reusable.
+    image = None
+    capture_path = "subprocess"
     window = {"wid": win.wid, "title": win.title, "w": win.w, "h": win.h,
               "x": win.x, "y": win.y}
     # Use the same captured pixels for the input boundary and OCR. Never reuse a
@@ -617,9 +623,7 @@ def read_conversation(max_messages: int = 12, previous_wid: int | None = None,
         with tempfile.TemporaryDirectory() as td:
             png = Path(td) / "wechat.png"
             if capture_window(win.wid, png):
-                from Foundation import NSURL
-                source = Quartz.CGImageSourceCreateWithURL(NSURL.fileURLWithPath_(str(png)), None)
-                image = Quartz.CGImageSourceCreateImageAtIndex(source, 0, None) if source else None
+                image = _load_png_image(png)
     if calibration is not None:
         if image is None:
             return {"ok": False, "error": "capture failed", "messages": []}
@@ -651,11 +655,12 @@ def read_conversation(max_messages: int = 12, previous_wid: int | None = None,
     fingerprint = _fingerprint(image, input_top) if image is not None and outline else None
     if layout == prev_layout and _same_frame(fingerprint, prev_fingerprint):
         total = (time.perf_counter() - t0) * 1000
+        timing = {"capture": total, "ocr": 0.0, "total": total,
+                  "capture_path": capture_path}
         return {"ok": True, "unchanged": True, "messages": [], "fingerprint": fingerprint,
                 "chat_title": "", "window": window, "n_blocks": 0,
                 "layout": layout, "input_rect": visual_rect,
-                "timing_ms": {"capture": total, "ocr": 0.0, "total": total,
-                              "capture_path": capture_path}}
+                "timing_ms": timing}
 
     t_cap = time.perf_counter()
     if image is None:
@@ -666,6 +671,8 @@ def read_conversation(max_messages: int = 12, previous_wid: int | None = None,
     chat_title = extract_chat_title(blocks)
     msgs = (extract_messages(blocks, max_messages=max_messages, input_top=input_top)
             if outline else [])
+    timing = {"capture": (t_cap - t0) * 1000, "ocr": (t_ocr - t_cap) * 1000,
+              "total": (t_ocr - t0) * 1000, "capture_path": capture_path}
     return {
         "ok": True,
         "unchanged": False,
@@ -675,8 +682,7 @@ def read_conversation(max_messages: int = 12, previous_wid: int | None = None,
         "chat_title": chat_title,
         "window": window,
         "messages": msgs,
-        "timing_ms": {"capture": (t_cap - t0) * 1000, "ocr": (t_ocr - t_cap) * 1000,
-                      "total": (t_ocr - t0) * 1000, "capture_path": capture_path},
+        "timing_ms": timing,
         "n_blocks": len(blocks),
         "fingerprint": fingerprint,
     }

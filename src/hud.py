@@ -282,6 +282,7 @@ class HudController(NSObject):
         self._collapsed = False
         self._expanded_h = None       # full height, captured the first time we collapse
         self._paused = False
+        self._always_on_top = True     # menu-bar switch; preserve the historical default
         # YOLO overlay default: JEV_BOXES=1 (or true/yes/on) in the env file starts it on;
         # either way the menu-bar item flips it at runtime
         self._show_boxes = userconfig.get("JEV_BOXES").strip().lower() in (
@@ -313,7 +314,8 @@ class HudController(NSObject):
                  | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskNonactivatingPanel)
         self.panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, PANEL_W, PANEL_H), style, NSBackingStoreBuffered, False)
-        self.panel.setLevel_(AppKit.NSFloatingWindowLevel)
+        self.panel.setLevel_(AppKit.NSFloatingWindowLevel if self._always_on_top
+                             else AppKit.NSNormalWindowLevel)
         self.panel.setOpaque_(False)
         self.panel.setAlphaValue_(1.0)
         self.panel.setHasShadow_(True)
@@ -576,8 +578,9 @@ class HudController(NSObject):
         Three properties keep it safe: it is OFF by default (menu-bar toggle); clicks pass
         through (`ignoresMouseEvents`), so WeChat never gets blocked; and perception
         captures by window ID, so this window can never pollute our own OCR.
-        Coordinate mapping assumes the 1x nominal capture's pixel size equals the window's
-        point size — that is exactly what kCGWindowImageNominalResolution promises.
+        Coordinate mapping is pure normalized geometry × window point size, so it is
+        independent of the capture's pixel resolution (the old 1x-nominal assumption went
+        away with #83's subprocess capture).
         """
         self._ov_panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, 200, 200), NSWindowStyleMaskBorderless,
@@ -728,6 +731,7 @@ class HudController(NSObject):
             ("显示 / 收起面板", "collapsePanel:", ""),
             ("暂停读屏", "togglePause:", ""),
             ("YOLO 检测框", "toggleBoxes:", ""),
+            ("固定在最前面", "toggleAlwaysOnTop:", ""),
             ("立即重新分析", "reanalyze:", ""),
             ("模型设置…", "openSettings:", ","),
             ("校准区域…", "calibrateMessages:", ""),
@@ -740,8 +744,11 @@ class HudController(NSObject):
             item.setTarget_(self)
         self.pause_item = menu.itemArray()[1]
         self.boxes_item = menu.itemArray()[2]
+        self.always_on_top_item = menu.itemArray()[3]
         self.boxes_item.setState_(
             AppKit.NSOnState if self._show_boxes else AppKit.NSOffState)
+        self.always_on_top_item.setState_(
+            AppKit.NSOnState if self._always_on_top else AppKit.NSOffState)
         self.status_item.setMenu_(menu)
 
     @objc.python_method
@@ -1450,6 +1457,17 @@ class HudController(NSObject):
             self.analyzed_text = None
             self._render("status", "已恢复 · 读屏中", PALETTE["muted"])
 
+    def toggleAlwaysOnTop_(self, sender):
+        """Toggle only the HUD's window level; the menu action takes effect immediately."""
+        self._always_on_top = not self._always_on_top
+        self.panel.setLevel_(AppKit.NSFloatingWindowLevel if self._always_on_top
+                             else AppKit.NSNormalWindowLevel)
+        self.always_on_top_item.setState_(
+            AppKit.NSOnState if self._always_on_top else AppKit.NSOffState)
+        if self._always_on_top:
+            # Raise the already-visible panel without making it key or stealing WeChat focus.
+            self.panel.orderFrontRegardless()
+
     def reanalyze_(self, sender):
         if self._paused:
             self._render("status", "已暂停 · 请先继续读屏", PALETTE["amber"])
@@ -1802,17 +1820,28 @@ class HudController(NSObject):
         now_input = time.monotonic()
         if (res["window"] != getattr(self, "_input_window", None)
                 or now_input >= getattr(self, "_input_next", 0)):
-            self._input_target = app.locate_input(res["window"])
-            self._input_target["app"] = app.key   # 填入前复核：目标必须属于当前 App
-            if self._input_target["box"] is None and app.needs_screen_capture:
+            target = app.locate_input(res["window"])
+            # AX can transiently return None while the chat app rebuilds its tree during a
+            # foreground/window transition. Keep this frame readable and let the next
+            # scheduled read retry; never let a missing target abort the read worker.
+            target = dict(target) if isinstance(target, dict) else {
+                "box": None, "rect": None, "window": dict(res["window"]),
+                "reason": "输入框暂时不可用",
+            }
+            target["app"] = app.key   # 填入前复核：目标必须属于当前 App
+            if target["box"] is None and app.needs_screen_capture:
                 # 视觉后备要截图/OCR，只有走屏幕采集的 App（微信）才允许进入；
                 # QQ 的 AX 路径绝不截图——box 为 None 就让它保持 None（填入按钮报原因）。
                 from input_region import locate_visual_input
-                self._input_target["visual_rect"] = (res.get("input_rect")
-                                                     or locate_visual_input(res["window"]))
-                if self._input_target["visual_rect"]:
+                target["visual_rect"] = (res.get("input_rect")
+                                         or locate_visual_input(res["window"]))
+                if target["visual_rect"]:
                     from visual_fill import chat_signature
-                    self._input_target["chat_signature"] = chat_signature(res["window"], self._input_target["visual_rect"])
+                    target["chat_signature"] = chat_signature(res["window"], target["visual_rect"])
+            if capture_foreground_epoch != self._foreground_epoch:
+                self._next_read_ts = time.time() + FAST_TICK
+                return
+            self._input_target = target
             self._input_window = dict(res["window"])
             self._input_next = now_input + 1.0
         with self._context_lock:
@@ -1881,7 +1910,7 @@ class HudController(NSObject):
                 note = "（首次，含 Vision 加载）" if first_read and t.get("ocr", 0) > 400 else ""
                 # say when the fast in-process capture was refused: otherwise a permanent
                 # fallback looks like ordinary slowness instead of something to report
-                slow_cap = " · 抓屏走了子进程（进程内被抓图接口拒绝）" \
+                slow_cap = " · 抓屏走了带超时的子进程" \
                     if t.get("capture_path") == "subprocess" else ""
                 _log(f"读屏 抓取 {t.get('capture', 0):.0f}ms + OCR {t.get('ocr', 0):.0f}ms"
                      f" = {t.get('total', 0):.0f}ms · 读到 {len(msgs)} 条（对方 {len(thems)} 条）"
