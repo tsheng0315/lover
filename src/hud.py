@@ -2582,6 +2582,10 @@ def main() -> None:
          f" · 生成层 {(_base + ' / ' + _model) if _key else '未配置（候选区会是空的）'}"
          + ("（内置默认）" if _src == BUILTIN_SOURCE else "")
          + (" · YOLO 框开" if controller._show_boxes else ""))
+    if styles.REJECTED_TONES:
+        # the dropdown silently missing a tone the user typed is a support ticket; say
+        # why it was refused and what a passing description looks like, once, at startup
+        _log("自定义话术未加载 · " + "；".join(styles.REJECTED_TONES))
     controller._show()
     # #38: ask a brand-new user how to judge BEFORE warming — the choice lands in
     # os.environ (and the env file), so the warm-up below honours it on this launch.
