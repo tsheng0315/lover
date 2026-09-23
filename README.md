@@ -58,7 +58,7 @@ uv run python probe/bootstrap_regression.py      # 两种启动入口的离线�
 
 ## 配置
 
-两层、两个 key、**都可以不填**：判断层不填时首次启动会引导选择——配置 key 在线判断，或下载离线模型（约 7 GB）；也可以稍后再说，面板会持续提示。生成层打包版内置共享 key，不配也能出候选，数据流向见 [PRIVACY.md](PRIVACY.md)。全部配置在一个 env 文件（**不提供第二种格式**）：
+两层、两个 key、**都可以不填**：判断层不填时首次启动会引导选择——配置 key 在线判断，或下载离线模型（约 3.8 GB）；也可以稍后再说，面板会持续提示。生成层打包版内置共享 key，不配也能出候选，数据流向见 [PRIVACY.md](PRIVACY.md)。全部配置在一个 env 文件（**不提供第二种格式**）：
 
 ### 可视化配置（#18）
 
@@ -103,7 +103,7 @@ chmod 600 ~/.config/jev-jarvis/env
 
 | 内容 | 位置 | 大小 | 清理 |
 |---|---|---|---|
-| 判断层本地模型 `decider-2b`（首次启动引导选择后才下载，判断+排序共用） | `~/.cache/huggingface/hub/models--Mapika--decider-2b` | ~7 GB | 模型设置 →「判断 · Jev」页「删除模型…」；或 `rm -rf ~/.cache/huggingface/hub/models--Mapika--decider-2b`；之后走本地判断会重新下载 |
+| 判断层本地模型 `decider-2b`（首次启动引导选择后才下载，判断+排序共用） | `~/.cache/huggingface/hub/models--Mapika--decider-2b` | ~3.8 GB | 模型设置 →「判断 · Jev」页「删除模型…」；或 `rm -rf ~/.cache/huggingface/hub/models--Mapika--decider-2b`；之后走本地判断会重新下载 |
 | Python 运行环境（venv） | `~/Library/Application Support/jev-jarvis/venv` | ~0.7 GB | 删除 .app 不会连带删它，需手动删 |
 
 生成层配 Ollama 的话模型在 Ollama 自己的目录（`~/.ollama`），非本项目下载。

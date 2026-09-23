@@ -2218,10 +2218,10 @@ class HudController(NSObject):
         alert.setMessageText_("选择判断方式")
         alert.setInformativeText_(
             "未配置判断层 key。判断每条消息的意图与风险，可以用云端 key"
-            "（轻量、无下载），也可以下载离线模型（约 7 GB，之后完全离线）。")
+            "（轻量、无下载），也可以下载离线模型（约 3.8 GB，之后完全离线）。")
         accessory = AppKit.NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 360, 84))
         choices = (("cloud", "配置 key 在线判断（推荐）", "轻量、无下载，需要 TypeSafe key"),
-                   ("local", "下载离线模型", "约 7 GB 磁盘，下载后完全离线可用"))
+                   ("local", "下载离线模型", "约 3.8 GB 磁盘，下载后完全离线可用"))
         radios = []
         y = 58
         for _value, title, detail in choices:

@@ -230,11 +230,11 @@ class SettingsController(NSObject):
     def refresh_offline_section(self):
         cached = judge.model_cached()
         if cached:
-            text = f"离线判断模型：已下载（{judge.model_disk_usage() / 2**30:.1f} GB 磁盘占用）"
+            text = f"离线判断模型：已下载（{judge.model_disk_usage() / 1e9:.1f} GB 磁盘占用）"
             if userconfig.get("JUDGE_BACKEND").strip().lower() == "cloud":
                 text += " · 当前选择在线判断"
         else:
-            text = "离线判断模型：未下载 · 启用后下次启动预热时下载（约 7 GB）"
+            text = "离线判断模型：未下载 · 启用后下次启动预热时下载（约 3.8 GB）"
         self.offline_label.setStringValue_(text)
         self.offline_delete_btn.setHidden_(not cached)
         self.offline_enable_btn.setHidden_(cached)
@@ -242,7 +242,7 @@ class SettingsController(NSObject):
     def deleteOfflineModel_(self, sender):
         alert = A.NSAlert.alloc().init()
         alert.setMessageText_("删除离线判断模型？")
-        alert.setInformativeText_("之后使用离线判断需重新下载（约 7 GB）。正在运行的应用不受影响，重启后生效。")
+        alert.setInformativeText_("之后使用离线判断需重新下载（约 3.8 GB）。正在运行的应用不受影响，重启后生效。")
         alert.addButtonWithTitle_("删除")
         alert.addButtonWithTitle_("取消")
         if alert.runModal() != A.NSAlertFirstButtonReturn:
@@ -272,7 +272,7 @@ class SettingsController(NSObject):
     def enableOfflineModel_(self, sender):
         alert = A.NSAlert.alloc().init()
         alert.setMessageText_("启用离线判断？")
-        alert.setInformativeText_("下次启动的预热将下载判断模型（约 7 GB，一次性），之后判断完全离线进行。")
+        alert.setInformativeText_("下次启动的预热将下载判断模型（约 3.8 GB，一次性），之后判断完全离线进行。")
         alert.addButtonWithTitle_("启用")
         alert.addButtonWithTitle_("取消")
         if alert.runModal() != A.NSAlertFirstButtonReturn:

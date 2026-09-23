@@ -159,7 +159,7 @@ def download_block_reason(repo: str = "Mapika/decider-2b") -> str | None:
                 "如需离线判断，可在模型设置的「判断 · Jev」页启用")
     if model_cached(repo):
         return None                      # auto/skip: keep the historical behaviour
-    return ("离线判断模型尚未下载（约 7 GB）· 可配置 TYPESAFE_API_KEY 走云端判断，"
+    return ("离线判断模型尚未下载（约 3.8 GB）· 可配置 TYPESAFE_API_KEY 走云端判断，"
             "或在模型设置的「判断 · Jev」页启用离线模型")
 
 
