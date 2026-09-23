@@ -231,6 +231,7 @@ class HudController(NSObject):
         self._fingerprint = None    # last chat-pane fingerprint; equal ⇒ skip OCR entirely
         self._last_full = None      # last OCR'd result, reused while the pane is unchanged
         self._analyzing = False     # judge+generate runs off the tick path
+        self._regenerating = False  # explicit candidate refresh; does not re-read/judge
         # Pre-judgment: the local judge starts the moment a new message is seen, and the
         # settle gate consumes the verdict if the text is unchanged — intent/risk land on
         # screen ~1 s earlier and only the (paid) generation half still waits. Single-slot
@@ -496,6 +497,20 @@ class HudController(NSObject):
                                   "track": track, "fill": fill_bar})
             self._rows.append(slot_rows)
 
+        self.reanalyze_button = self._make_button(
+            14, 0, 96, 28, "立刻分析", "reanalyze:", 0)
+        self.reanalyze_button.setAccessibilityLabel_("立刻分析")
+        self.reanalyze_button.setToolTip_("重新读取微信并执行完整分析")
+        view.addSubview_(self.reanalyze_button)
+        self._detail_views.append(self.reanalyze_button)
+
+        self.regenerate_button = self._make_button(
+            118, 0, PANEL_W - 132, 28, "重新生成推荐回答", "regenerateReply:", 0)
+        self.regenerate_button.setAccessibilityLabel_("重新生成推荐回答")
+        self.regenerate_button.setToolTip_("沿用当前消息和判断结果，只重新生成候选回答")
+        view.addSubview_(self.regenerate_button)
+        self._detail_views.append(self.regenerate_button)
+
         self.panel.setContentView_(view)
         self._title_h = self.panel.frame().size.height - PANEL_H   # measured, not assumed
         self._relayout()
@@ -603,7 +618,12 @@ class HudController(NSObject):
             if slot < styles.MAX_SLOTS - 1:
                 dy += GROUP_GAP
 
-        content_h = dy + BOTTOM_PAD
+        # no setHidden_(False) here: the collapsed panel keeps _detail_views hidden, and
+        # _render_groups() reaches this method without a collapsed guard
+        placements.append((self.reanalyze_button, 14, dy, 96, 28))
+        placements.append((self.regenerate_button, 118, dy, PANEL_W - 132, 28))
+        dy += 28 + BOTTOM_PAD
+        content_h = dy
         view = self.panel.contentView()
         view.setFrameSize_(NSMakeSize(PANEL_W, content_h))
         fixed = []
@@ -1169,6 +1189,30 @@ class HudController(NSObject):
             self._push("applyError:", f"换话术失败: {type(e).__name__}: {str(e)[:40]}")
 
     @objc.python_method
+    def _regenerate_work(self, text: str, intent: str, slot_tones: list[str], context):
+        """Refresh candidate replies atomically, without re-reading or re-judging."""
+        t0 = time.perf_counter()
+        try:
+            if not self._reply_current():
+                return
+            gen = self.generator.generate(text, intent, slot_tones, context)
+            payload = self._payload_from_gen(gen)
+            if payload is None:
+                err = (gen.get("error") or "空结果")[:60]
+                _log(f"重新生成无可用候选: {err}")
+                self._push("applyError:", f"重新生成失败: {err}")
+                return
+            ranked = self._rank_payload(payload, text, intent)
+            _log(f"重新生成推荐回答 {(time.perf_counter() - t0) * 1000:.0f}ms · "
+                 f"{sum(len(items) for _s, _t, items in ranked)} 条候选")
+            self._push("applyRegenerated:", ranked)
+        except Exception as e:
+            _log(f"重新生成失败 {type(e).__name__}: {str(e)[:60]}")
+            self._push("applyError:", f"重新生成失败: {type(e).__name__}: {str(e)[:40]}")
+        finally:
+            self._regenerating = False
+
+    @objc.python_method
     def _payload_current(self, payload) -> bool:
         """False when the tone selection moved on — a late result must not repaint it.
 
@@ -1191,7 +1235,49 @@ class HudController(NSObject):
         self._render("status", f"已换话术 · {total} 条", PALETTE["muted"])
         self._render_groups(payload)
 
+    def applyRegenerated_(self, payload):
+        if not self._payload_current(payload):
+            return
+        self._set_candidate_header(self._cand_header(payload))
+        total = sum(len(items) for _s, _t, items in payload)
+        self._render_groups(payload)
+        self._render("status", f"已重新生成 · {total} 条", PALETTE["muted"])
+
     # ------------------------------------------------------------ controls
+    def regenerateReply_(self, sender):
+        """Regenerate candidates for the current message without re-reading or judging."""
+        if self._paused:
+            self._render("status", "已暂停 · 请先继续读屏", PALETTE["amber"])
+            return
+        if self._wechat_frontmost is not True:
+            # The panel floats over every app: clicked from elsewhere this run would be
+            # discarded by _reply_current() with no status update to say so — ask here.
+            self._render("status", "微信不在前台 · 回到微信再试", PALETTE["amber"])
+            return
+        if self._regenerating:
+            self._render("status", "推荐回答生成中…", PALETTE["muted"])
+            return
+        text = self.analyzed_text
+        messages = (self._last_full or {}).get("messages") or []
+        newest = next((m for m in reversed(messages)
+                       if m.side == "them" and m.text == text), None)
+        active = [tone for tone in self.slot_tones if tone in styles.PRESETS]
+        if not text or newest is None or self._reply_key is None:
+            self._render("status", "当前没有可重新生成的推荐回答", PALETTE["amber"])
+            return
+        if not active:
+            self._render("status", "没选话术 · 至少选一个", PALETTE["amber"])
+            return
+        context = self._context_text(messages, newest)
+        self._regenerating = True
+        self._set_candidate_header("候选回复 · 重新生成中…")
+        self._render("status", "重新生成推荐回答…", PALETTE["muted"])
+        _log(f"重新生成推荐回答 · 已请求 · 消息={text[:40]}")
+        threading.Thread(target=self._reply_task,
+                         args=(self._reply_epoch, self._regenerate_work,
+                               text, self._last_intent, list(self.slot_tones), context),
+                         daemon=True).start()
+
     def collapsePanel_(self, sender):
         self._set_collapsed(not self._collapsed)
 
@@ -1223,13 +1309,25 @@ class HudController(NSObject):
             self._render("status", "已恢复 · 读屏中", PALETTE["muted"])
 
     def reanalyze_(self, sender):
+        if self._paused:
+            self._render("status", "已暂停 · 请先继续读屏", PALETTE["amber"])
+            return
+        self._reply_epoch += 1
+        self._gen_epoch += 1
         self._prejudge_req = None      # "re-analyze" means re-run, not reuse the pre-judge
         self._prejudge_result = None
         self._pregen_req = None        # …and not reuse the early generation either
         self._pregen_result = None
         self.last_seen = None
         self.analyzed_text = None
+        self._stream_rows = {}
+        self._fingerprint = None
+        self._stable_n = 0
+        self._next_read_ts = 0
         self._render("status", "重新分析中…", PALETTE["muted"])
+        if not self._paused and not self._busy:
+            self._busy = True
+            threading.Thread(target=self._work, daemon=True).start()
 
     def quitApp_(self, sender):
         AppKit.NSApplication.sharedApplication().terminate_(None)
@@ -1870,7 +1968,8 @@ class HudController(NSObject):
     @objc.python_method
     def _push(self, selector: str, payload=None):
         if selector in {"applyIncoming:", "applyPending:", "applyJudgment:",
-                        "applyCandidates:", "applyStreamLine:", "applyWaiting:", "applyError:"}:
+                        "applyCandidates:", "applyRegenerated:", "applyStreamLine:",
+                        "applyWaiting:", "applyError:"}:
             epoch = getattr(self._reply_worker, "epoch", self._reply_epoch)
             self._push_reply(selector, payload, epoch)
             return
