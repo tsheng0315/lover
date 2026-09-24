@@ -46,15 +46,15 @@
 
 **装**：macOS 13+（Apple Silicon），GitHub 找 `jev-chat/jev-chat-jarvis-mac`，Releases 下载 zip，拖进「应用程序」，第一次右键 → 打开（没做公证，只需这一次）。老用户直接覆盖安装，配置不受影响——旧版「启动一片空白」这版根治，建议更新。MIT 开源。
 
-【配图 4：`docs/wechat-group-2.png` / `-3` / `-4` / `-5` 四张**按顺序**（编辑器里排 2×2），下面一排：`docs/wechat-personal.png` 与 `docs/wechat-mp-qr.png`（个人微信 + 公众号）】
+【配图 4：`docs/wechat-group-2.png` / `-3` / `-4` / `-5` 四张**按顺序**（编辑器里排 2×2），下面接 `docs/wechat-mp-qr.png`（公众号）】
 
-交流群从 2 群往下扫（1 群满了），满了换下一个；不想进群就加个人微信或关注公众号——**以后有新版本，群里和公众号都会第一时间说**。bug 走 GitHub Issues。
+交流群从 2 群往下扫（1 群满了），满了换下一个；群满了或者二维码过期了，关注公众号私信「进群」拿最新进群方式——**以后有新版本也都在公众号通知**。bug 走 GitHub Issues。
 
 ---
 
 ## 发布提示
 
-- **素材顺序**：① 动图 `docs/demo.gif` → ② 面板截图 `docs/release-v0.5.0.png` → ②b 下载进度 `docs/download-progress.png` → ③ 设置窗口三张（`settings-jev` / `settings-openai` / `settings-anthropic`）→ ④ 群码 2×2 + 个人微信/公众号。
+- **素材顺序**：① 动图 `docs/demo.gif` → ② 面板截图 `docs/release-v0.5.0.png` → ②b 下载进度 `docs/download-progress.png` → ③ 设置窗口三张（`settings-jev` / `settings-openai` / `settings-anthropic`）→ ④ 群码 2×2 + 公众号 `docs/wechat-mp-qr.png`。
 - **⚠️ 打码**：`settings-openai.png` 服务地址含内网 IP，发布前必须处理；封面图可用面板截图裁 2.35:1。
 - **想加技术向的可选一句**（放「三件事」段后）：`8 类意图零样本回归 86.4%（22 条、只看单条消息的无上下文口径）`。
 - **外链**：未认证公众号发不了外链，GitHub 地址写成纯文本让读者自己搜。
