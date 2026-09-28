@@ -77,6 +77,15 @@ REASON_DUPLICATE = "刚填入过同样的内容，已忽略这次重复点击"
 REASON_COPIED = "已复制到剪贴板，请在微信输入框按 ⌘V 粘贴"
 REASON_COPY_FAILED = "复制到剪贴板失败，请手动选择候选文本复制"
 
+# Why the clipboard fallback fired, from the most recent Fill click. Diagnosis only —
+# never message text (this lands in a log users paste into issues, #139 follow-up).
+_LAST_FALLBACK: str | None = None
+
+
+def fallback_diagnosis() -> str | None:
+    """The recorded reason the last Fill had to fall back, or None if it didn't."""
+    return _LAST_FALLBACK
+
 
 def has_accessibility() -> bool:
     """True when this process may read and drive other apps' accessibility trees."""
@@ -316,6 +325,23 @@ def fill_text(text: str, target=None) -> tuple[bool, str]:
             # fallback: the user's own keypress is a real event, while synthesized
             # click+keystrokes (visual_fill) read as automation to WeChat's risk
             # control — force-logout, #139.
+            global _LAST_FALLBACK
+            # Re-probe once for the log: distinguishes the three candidate causes —
+            # a control findable NOW means perception-time staleness (timing/tree
+            # recovery); a window-read error means the known whole-tree collapse
+            # (kAXErrorCannotComplete -25211, 2026-09-26 note); otherwise the AX
+            # structure genuinely exposes no input control (cf. WeChat 4.1.15).
+            recheck = _find_input_box(app.processIdentifier())
+            if recheck is not None:
+                _LAST_FALLBACK = "兜底触发 · 此刻重查 AX 输入框可用——感知阶段定位已过期（时序或塌树后恢复）"
+            else:
+                try:
+                    err, _ = ApplicationServices.AXUIElementCopyAttributeValue(
+                        app, ApplicationServices.kAXWindowsAttribute, None)
+                except Exception:
+                    err = -1
+                why = "塌树特征" if err == -25211 else f"AX 窗口读取 err={err}"
+                _LAST_FALLBACK = f"兜底触发 · 重查仍无输入控件（{why}）"
             if _copy_to_clipboard(text):
                 return True, REASON_COPIED
             return False, REASON_COPY_FAILED

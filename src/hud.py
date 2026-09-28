@@ -1201,6 +1201,10 @@ class HudController(NSObject):
             self._render("status", "填入失败：输入目标属于另一应用，请等检测框更新后重试", PALETTE["red"])
             return
         ok, reason = app.fill_text(text, target=target)
+        if reason in (fill.REASON_COPIED, fill.REASON_COPY_FAILED):
+            diag = fill.fallback_diagnosis()
+            if diag:
+                _log(f"填入兜底 · {diag}")    # #139 排查数据：无正文，只有诊断
         if ok:
             self._render("status", reason, PALETTE["green"])
         else:
