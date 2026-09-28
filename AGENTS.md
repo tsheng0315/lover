@@ -16,7 +16,7 @@
   ```
 
 - 日志：`~/Library/Logs/jev-jarvis.log`，分阶段耗时（读屏/判断/生成/排序/端到端）。**刻意不含消息正文与候选文字**（用户可放心贴 issue），只在事件发生时打、不在每跳打；首次调用标注「首次」。
-- 发版：版本号只有 `pyproject.toml` 一处；两条等价路径——推 tag（`git tag vX.Y.Z && git push origin vX.Y.Z`，须与 pyproject 版本一致，Release workflow 在 CI 自动构建+发布）或本地 `./packaging/release.sh --publish` 从**干净 worktree** 构建（zip 解压回验+SHA256+gh release）；无 Apple 公证，首次打开要教右键。资产命名统一 `jev-jarvis-macos-` 前缀：版本包 `jev-jarvis-macos-v<版本>.zip`、稳定名 `jev-jarvis-macos-latest.zip`（README 下载链接靠它，改名必须三处同步：release.sh + README + 当期 release notes）。公告草稿：Release Drafter 随 master push 自动按 PR 标签维护 draft，发版时对照校对（draft 实际可能不存在，#121 发版日实测——缺失就手写）。**发版前必核验 README 口径**：当版用户可见行为/数字的变化逐项同步进 README（功能描述、平台支持表、话术数量、已知限制、下一步清单），过时措辞（如「fork 实验分支」「本分支」「个人截图不随代码提交」这类时效句）当版清掉；公告两件套 `docs/release-notes-vX.Y.Z.md`（GitHub Release 正文源，图用相对路径，发 release 时换 raw 链接）+ 对应图文宣传稿（命名对齐 `docs/` 内既有文件）随发版产出，口径以核对后的 README 为准，不另编数字。
+- 发版：版本号只有 `pyproject.toml` 一处，**改完必须 `uv lock`**——uv.lock 也记录版本号，CI 的 `uv run --locked` 校验不同步直接红灯（0.6.1 实测：tag 已发、master CI 连红三个 commit）；两条等价路径——推 tag（`git tag vX.Y.Z && git push origin vX.Y.Z`，须与 pyproject 版本一致，Release workflow 在 CI 自动构建+发布）或本地 `./packaging/release.sh --publish` 从**干净 worktree** 构建（zip 解压回验+SHA256+gh release）；无 Apple 公证，首次打开要教右键。资产命名统一 `jev-jarvis-macos-` 前缀：版本包 `jev-jarvis-macos-v<版本>.zip`、稳定名 `jev-jarvis-macos-latest.zip`（README 下载链接靠它，改名必须三处同步：release.sh + README + 当期 release notes）。公告草稿：Release Drafter 随 master push 自动按 PR 标签维护 draft，发版时对照校对（draft 实际可能不存在，#121 发版日实测——缺失就手写）。**发版前必核验 README 口径**：当版用户可见行为/数字的变化逐项同步进 README（功能描述、平台支持表、话术数量、已知限制、下一步清单），过时措辞（如「fork 实验分支」「本分支」「个人截图不随代码提交」这类时效句）当版清掉；公告两件套 `docs/release-notes-vX.Y.Z.md`（GitHub Release 正文源，图用相对路径，发 release 时换 raw 链接）+ 对应图文宣传稿（命名对齐 `docs/` 内既有文件）随发版产出，口径以核对后的 README 为准，不另编数字。
 - 认领协议：动任何 issue 的代码前，先按 [CONTRIBUTING.md](CONTRIBUTING.md) 完成认领三步自检 + 评论认领 + 设 assignee——多人多 AI 并行扫 issue，不认领必撞车。
 
 ## 架构与硬约束
@@ -35,6 +35,8 @@
 ## 已知的坑
 
 - **CLI 进程里验不了感知层**：独立 shell 进程里 `CGWindowListCreateImage` 会被拒（静默退子进程路径、无指纹）。验证要么用合成 CGImage 测纯函数，要么起真应用看日志。
+- **微信 4.1.x 防截屏灰度只封截图路径，AX 不受影响**（09-28 配对实测 sharing=0 时 AX 感知/输入框定位全通）：灰度按**登录会话**抽签、随时横跳，别把「今天能截」当稳定状态；读屏突然失灵先查窗口 sharing 再怀疑代码。AX 适配器是截图被封时的终局方案（感知通、填入通，9/26 实测，见记忆 wechat-ax-path-validation）。
+- **测试用 .app 副本目录名不能带后缀**：CGWindowList 的 owner 名取自 .app 目录名，`WeChat-4.1.20-backup.app` 会让 `find_wechat_window` 的精确匹配静默 miss——前台识别走 Info.plist 照常、读屏无任何日志直接失效（09-28 上午「识别不到窗口」即此因）。另：切换版本要先 pkill 微信全家（含 helper），残留 helper 会把 `open` 劫持回 /Applications 版本。
 - **文本接口路径走 AX 不走 OCR**：CLI 进程里能直接验；改解析先跑 probe/ax_probe.py 看真实 class 名，再改 src/apps/ax_app.py 顶部常量。填入后备是键盘事件，同样不许改回剪贴板。
 - 坐标系：本模块布局常量（`CHAT_PANE_X_MIN` 等）是**底部原点**（Vision 口径）；`CGImageCreateWithImageInRect` 是**左上原点**，换算别搞反。
 - 生成层**不能用 thinking 模型**（思考吃光 `max_tokens`，候选 0 条，面板只报「生成失败」误导用户）。
