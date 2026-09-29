@@ -1963,6 +1963,7 @@ class HudController(NSObject):
                 # one-off from being read as a regression (same reason the judge line does it)
                 note = "（首次，含 Vision 加载）" if first_read and t.get("ocr", 0) > 400 else ""
                 _log(f"读屏 抓取 {t.get('capture', 0):.0f}ms + OCR {t.get('ocr', 0):.0f}ms"
+                     f"{' + 数字补识别 ' + str(round(t['recover'])) + 'ms' if t.get('recover') else ''}"
                      f"{' + 分类 ' + str(round(t['classify'])) + 'ms' if t.get('classify') else ''}"
                      f" = {t.get('total', 0):.0f}ms · 读到 {len(msgs)} 条（对方 {len(thems)} 条）"
                      f"{note}")

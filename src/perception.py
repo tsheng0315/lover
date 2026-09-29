@@ -686,14 +686,19 @@ def read_calibrated(image, calibration, window, max_messages=12, capture_ms=0.0)
         top = max(b.y+b.h for b in candidates)
         line = [b for b in candidates if top-(b.y+b.h) < b.h*.6]
         title = " ".join(b.text for b in sorted(line,key=lambda b:b.x))
+    t_ocr = time.perf_counter()
     blocks = recover_numeric_bubbles(image, blocks, (x,y,w,h))
+    t_recover = time.perf_counter()
     msgs = extract(image, blocks, (x,y,w,h), max_messages)
-    elapsed = (time.perf_counter()-t0)*1000
+    t_end = time.perf_counter()
+    elapsed = (t_end-t0)*1000
     return {"ok": True, "unchanged": False, "window": window, "messages": msgs,
             "chat_title": title, "n_blocks": len(blocks), "fingerprint": None,
             "layout": (window['wid'],window['w'],window['h'],calibration.serialize()),
             "input_rect": None, "manual_calibration": True,
-            "timing_ms": {"capture":capture_ms, "ocr":elapsed,
+            "timing_ms": {"capture":capture_ms, "ocr":(t_ocr-t0)*1000,
+                          "recover":(t_recover-t_ocr)*1000,
+                          "classify":(t_end-t_recover)*1000,
                           "total":capture_ms+elapsed, "capture_path":"manual"}}
 
 
