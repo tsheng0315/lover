@@ -15,6 +15,42 @@ import judge_jev
 import styles
 
 
+def exercise_model_paths(h, msgs):
+    """Real adapters to the local HTTP server, only resident waits are replaced."""
+    tone = styles.DEFAULT_SLOTS[0]
+    h.slot_tones = [tone]
+    h.generator = generate.Generator()
+    h.judge = judge_jev.JevJudge(base=network.SettingsNetwork.base, key='test', model='test')
+    network.Server.code = 200
+    network.Server.response = {'choices': [{'message': {'content': '1. 合成候选甲\n2. 合成候选乙'}}],
+                       'answers': {'intent': {'choice': '闲聊', 'confidence': .9},
+                                   'risk': {'score': 1},
+                                   'best': {'choice': '合成候选甲', 'confidence': .8}}}
+    network.Server.requests = []
+    context = h._prejudge_req[1]
+    # Resident loops execute real adapters, with only their wait boundary replaced.
+    class StopLoop(BaseException):
+        pass
+    for name, event in [('_prejudge_loop', '_prejudge_event'), ('_pregen_loop', '_pregen_event')]:
+        signal = Mock()
+        signal.wait.side_effect = [None, StopLoop()]
+        setattr(h, event, signal)
+        if name == '_pregen_loop':
+            h._pregen_req = (msgs[-1].text, context, (tone,), h._reply_epoch)
+        try:
+            getattr(h, name)()
+        except StopLoop:
+            pass
+    h._pregen_result = None
+    h._reply_task(h._reply_epoch, h._analyze, msgs[-1], msgs, '')
+    h._reply_task(h._reply_epoch, h._run_generation, msgs[-1], msgs,
+                  {'intent': '闲聊'})
+    h._reply_task(h._reply_epoch, h._regen_work, msgs[-1].text, '闲聊', [tone])
+    h._reply_task(h._reply_epoch, h._regenerate_work, msgs[-1].text, '闲聊', [tone])
+    requests = list(network.Server.requests)
+    return requests
+
+
 class ContextRequests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -37,35 +73,8 @@ class ContextRequests(unittest.TestCase):
             h.save_background('chat', '合成背景：小王负责验收')
             msgs = fixture.read([fixtures.block('合成先前消息', .40, .80, .15),
                                  fixtures.block('合成当前消息', .40, .60, .15)])
-            tone = styles.DEFAULT_SLOTS[0]
-            h.slot_tones = [tone]
-            h.generator = generate.Generator()
-            h.judge = judge_jev.JevJudge(base=network.SettingsNetwork.base, key='test', model='test')
-            network.Server.code = 200
-            network.Server.response = {'choices': [{'message': {'content': '1. 合成候选甲\n2. 合成候选乙'}}],
-                               'answers': {'intent': {'choice': '闲聊', 'confidence': .9},
-                                           'risk': {'score': 1},
-                                           'best': {'choice': '合成候选甲', 'confidence': .8}}}
-            network.Server.requests = []
             context = h._prejudge_req[1]
-            # Resident loops execute real adapters, with only their wait boundary replaced.
-            class StopLoop(BaseException):
-                pass
-            for name, event in [('_prejudge_loop', '_prejudge_event'), ('_pregen_loop', '_pregen_event')]:
-                signal = Mock()
-                signal.wait.side_effect = [None, StopLoop()]
-                setattr(h, event, signal)
-                if name == '_pregen_loop':
-                    h._pregen_req = (msgs[-1].text, context, (tone,), h._reply_epoch)
-                with self.assertRaises(StopLoop):
-                    getattr(h, name)()
-            h._pregen_result = None
-            h._reply_task(h._reply_epoch, h._analyze, msgs[-1], msgs, '')
-            h._reply_task(h._reply_epoch, h._run_generation, msgs[-1], msgs,
-                          {'intent': '闲聊'})
-            h._reply_task(h._reply_epoch, h._regen_work, msgs[-1].text, '闲聊', [tone])
-            h._reply_task(h._reply_epoch, h._regenerate_work, msgs[-1].text, '闲聊', [tone])
-            requests = list(network.Server.requests)
+            requests = exercise_model_paths(h, msgs)
             self.assertGreaterEqual(len(requests), 11)
             for path, _headers, body in requests:
                 self.assertIn(path, ['/v1/chat/completions', '/v1/systemone'])
@@ -80,8 +89,8 @@ class ContextRequests(unittest.TestCase):
             network.Server.response = {'error': '合成隐私标记：消息、背景、候选'}
             logs = []
             with patch.dict(fixtures.HUD, {'_log': logs.append}):
-                h._reply_task(h._reply_epoch, h._regen_work, msgs[-1].text, '闲聊', [tone])
-                h._reply_task(h._reply_epoch, h._regenerate_work, msgs[-1].text, '闲聊', [tone])
+                h._reply_task(h._reply_epoch, h._regen_work, msgs[-1].text, '闲聊', h.slot_tones)
+                h._reply_task(h._reply_epoch, h._regenerate_work, msgs[-1].text, '闲聊', h.slot_tones)
             self.assertNotIn('合成隐私标记', str(logs) + str(fixture.queue))
 
     def test_local_fallback_forwards_same_context_to_judgment_and_rank(self):

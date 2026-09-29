@@ -1779,11 +1779,13 @@ class HudController(NSObject):
         self._win_wid = res["window"]["wid"]
         self._push("applyPosition:", res["window"])
         fresh_frame = not res["unchanged"]
+        previous_frame = self._last_full
         if res["unchanged"] and self._last_full is not None:
             # the settle/analyze gate below still runs every read; an unchanged frame
             # just skips re-deriving the messages it would act on
             res = self._last_full
-        elif (not res.get("manual_calibration") and not res["messages"] and self._last_full is not None
+        elif (not res.get("manual_calibration") and not res.get("n_blocks")
+              and not res["messages"] and self._last_full is not None
               and self._last_full.get("messages")):
             # Transient empty frame (#58): the window is still enumerated and the capture
             # succeeded, but OCR returned 0 blocks (4.x redraw glitch). Reuse the
@@ -1891,19 +1893,26 @@ class HudController(NSObject):
                 self._last_full = None
                 return
             msgs = res["messages"]
-            # 手动校准模式下，无法确认归属的文字不进入会话历史与模型上下文。
+            # 微信两种模式均在存历史之前排除归属未确认内容。
             # 必须在 visible/observe 之前过滤——事后过滤会让 _observed_offset 的
             # 索引错位；检测框仍画原始列表（含「未确认」框），见下方 applyBoxes。
             overlay_msgs = None
-            if res.get("manual_calibration"):
+            if app.key == "wechat":
                 overlay_msgs = msgs
                 msgs = [m for m in msgs if m.side != "unknown"]
-            visible = [(m.text, m.side, m.sender or "") for m in msgs]
+            visible = [chat_context.message_record(m) for m in msgs]
             self._observed_messages, self._observed_offset = visible, 0
             if self.history_enabled and self.conversations and not self.conversations.error:
                 try:
+                    previous = None
+                    if (app.key == "wechat" and previous_frame
+                            and previous_frame.get("chat_title") == res.get("chat_title")
+                            and previous_frame.get("window") == res.get("window")
+                            and previous_frame.get("layout") == res.get("layout")):
+                        previous = chat_context.recognition_revision(
+                            [m for m in previous_frame["messages"] if m.side != "unknown"], msgs)
                     self._observed_messages, self._observed_offset = self.conversations.observe(
-                        res.get("chat_title"), visible, record=fresh_frame)
+                        res.get("chat_title"), visible, record=fresh_frame, previous=previous)
                 except (OSError, ValueError):
                     _log("保存会话历史失败，使用当前画面继续分析")
                     self._push("applyError:", "会话历史保存失败，请检查磁盘空间及权限")
@@ -2262,7 +2271,7 @@ class HudController(NSObject):
             title = (self._last_full or {}).get("chat_title")
             return chat_context.context_text(
                 self._observed_messages if self._observed_messages is not None else
-                [(m.text, m.side, m.sender or "") for m in msgs],
+                [chat_context.message_record(m) for m in msgs],
                 self._observed_offset + next(i for i, m in enumerate(msgs) if m is newest),
                 limit=self.context_limit,
                 background=store.data.get(title, {}).get('background', '') if store else "")
@@ -2596,15 +2605,15 @@ class HudController(NSObject):
         for m in msgs:
             if m.w <= 0:
                 continue               # pre-overlay geometry: nothing to draw
-            who = m.sender or {"them": "对方", "me": "我"}.get(m.side, "方向未确认")
-            label = f"{who} {m.conf:.2f}"
+            label = f"{m.label} · OCR {m.conf:.2f}"
             if judged and m.side == "them" and m.text == newest_text:
                 color = (PALETTE["green"] if risk <= 3 else
                          PALETTE["amber"] if risk <= 6 else PALETTE["red"])
                 lw = 2.5
                 label += f" · {self._last_intent} 风险{risk}/9"
             else:
-                color = _rgb(0x576B95) if m.side == "me" else PALETTE["green"]
+                color = (_rgb(0x576B95) if m.side == "me" else
+                         PALETTE["amber"] if m.side == "unknown" else PALETTE["green"])
                 lw = 1.5
             chip = NSAttributedString.alloc().initWithString_attributes_(
                 label,
