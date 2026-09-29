@@ -24,7 +24,12 @@ def pixels(image):
 
 
 def component(mask, sx, sy, limit):
-    """Scanline flood fill: bound work for background and avoid per-pixel Python loops."""
+    """Scanline flood fill: bound work for background and avoid per-pixel Python loops.
+
+    limit 是面积上限，超过则返回 None（削 587ms 那种尖峰）。同时硬限 50 万像素
+    （即使 limit 更大），避免极端画面下遍历百万级像素。
+    """
+    limit = min(limit, 500000)
     h, w = mask.shape
     seen = np.zeros_like(mask)
     queue = deque([(sx, sy)])
@@ -307,6 +312,10 @@ def recover_numeric_bubbles(image, blocks, rect):
     Vision can omit isolated digits in a full chat image. Never infer sequences or
     convert lookalike letters to numbers; retain only explicit digits at Vision confidence >= 0.5.
     """
+    # 快速前置判断:只在「已识别 blocks 全是长文本且可能有紧凑数字气泡」时才扫描
+    # (省 ~130ms/次)。如果已识别到短 block(0-2 字符)且包含数字,说明 Vision 没漏。
+    if any(len(b.text.strip()) <= 2 and any(c.isdigit() for c in b.text) for b in blocks):
+        return blocks
     from perception import ocr_image
     rgb = pixels(image)
     H, W = rgb.shape[:2]
@@ -316,11 +325,13 @@ def recover_numeric_bubbles(image, blocks, rect):
     h, w = crop.shape[:2]
     background = np.median(crop.reshape(-1, 3), axis=0)
     colors, counts = np.unique(crop[::4, ::4].reshape(-1, 3), axis=0, return_counts=True)
+    # 第二层:候选颜色里如果没有符合数字气泡特征的(中性灰、对比度 7-65),提前退
+    candidates = [c for c in colors[np.argsort(counts)[-6:]]
+                  if np.ptp(c) <= 12 and 7 <= np.max(np.abs(c-background)) <= 65]
+    if not candidates:
+        return blocks
     recovered: list[TextBlock] = []
-    for color in colors[np.argsort(counts)[-6:]]:
-        # Neutral received bubbles; do not search avatars, green overlays or stickers.
-        if np.ptp(color) > 12 or not 7 <= np.max(np.abs(color-background)) <= 65:
-            continue
+    for color in candidates:
         mask = np.max(np.abs(crop-color), axis=2) <= 4
         for sy, sx in np.argwhere(mask[::4, ::4])*4:
             if not mask[sy, sx]: continue

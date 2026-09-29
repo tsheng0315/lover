@@ -360,7 +360,9 @@ def _vision_blocks(handler, languages, chat_only: bool, input_top=None, region=N
             ))
 
     req = Vision.VNRecognizeTextRequest.alloc().initWithCompletionHandler_(completion)
-    req.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+    # Fast 级别比 Accurate 快 ~8 倍(WWDC 2019),聊天文本(标准字体、无手写)足够准确。
+    # 实测 Accurate 411ms → Fast 预期 ~50-70ms(单次 OCR,校准路径调两次则 100-140ms)。
+    req.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelFast)
     req.setRecognitionLanguages_(list(languages))
     req.setUsesLanguageCorrection_(True)
     roi = None
