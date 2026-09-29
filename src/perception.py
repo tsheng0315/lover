@@ -774,11 +774,15 @@ def read_conversation(max_messages: int = 12, previous_wid: int | None = None,
     t_ocr = time.perf_counter()
 
     chat_title = extract_chat_title(blocks)
+    t_extract = time.perf_counter()
     msgs = (extract_messages(blocks, max_messages=max_messages, input_top=input_top, image=image,
                              chat_left=outline[0])
             if outline else [])
+    t_classify = time.perf_counter()
+    classify_ms = (t_classify - t_extract) * 1000
     timing = {"capture": (t_cap - t0) * 1000, "ocr": (t_ocr - t_cap) * 1000,
-              "total": (t_ocr - t0) * 1000, "capture_path": capture_path}
+              "classify": classify_ms,
+              "total": (t_classify - t0) * 1000, "capture_path": capture_path}
     return {
         "ok": True,
         "unchanged": False,

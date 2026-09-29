@@ -57,7 +57,14 @@ def extract(image, blocks, rect, max_messages=12):
     rx, ry, rw, rh = rect
     x0, y0 = round(rx*W), round(ry*H)
     x1, y1 = round((rx+rw)*W), round((ry+rh)*H)
-    crop = rgb[y0:y1, x0:x1].astype(np.int16)
+    crop_full = rgb[y0:y1, x0:x1].astype(np.int16)
+    h_full, w_full = crop_full.shape[:2]
+    # Retina captures (≈1468×1198) make component() traverse ~1M pixels per call.
+    # Stride-2 downsampling cuts area to 1/4; colour differences between bubble and
+    # background survive at half resolution, so classification is unchanged.
+    # Synthetic test canvases (≤600px) stay at scale=1 to keep pixel-exact assertions.
+    scale = 2 if min(h_full, w_full) > 600 else 1
+    crop = crop_full[::scale, ::scale] if scale > 1 else crop_full
     h, w = crop.shape[:2]
     # A tall bubble may occupy most of the pane. Its exterior margins, rather
     # than the whole crop, provide the background colour in that case.
@@ -104,8 +111,8 @@ def extract(image, blocks, rect, max_messages=12):
         # UI words such as “发送” may be genuine bubble/quote content. Region and
         # surface ownership decide admission; never delete a body by substring.
         if b.conf < MIN_CONF or not b.text.strip(): continue
-        bx, by = b.x*W-x0, (1-b.y-b.h)*H-y0
-        bw, bh = b.w*W, b.h*H
+        bx, by = (b.x*W-x0)/scale, ((1-b.y-b.h)*H-y0)/scale
+        bw, bh = b.w*W/scale, b.h*H/scale
         if bx < 0 or by < 0 or bx+bw > w+1 or by+bh > h+1: continue
         if by+bh <= header_bottom: continue
         found = None
@@ -127,7 +134,7 @@ def extract(image, blocks, rect, max_messages=12):
     # the pane background. Locate that rail independently of bubble surfaces.
     rails: dict[Box, list[TextBlock]] = {}
     for b in unresolved[:]:
-        bx, by, bh = b.x*W-x0, (1-b.y-b.h)*H-y0, b.h*H
+        bx, by, bh = (b.x*W-x0)/scale, ((1-b.y-b.h)*H-y0)/scale, b.h*H/scale
         sy = round(by+bh/2)
         if not 0 <= sy < h: continue
         for sx in range(max(0, round(bx-bh*1.8)), max(0, round(bx-3))):
@@ -146,9 +153,9 @@ def extract(image, blocks, rect, max_messages=12):
     bare_quotes = set()
     for (l,t,r,bot), members in rails.items():
         # The rail proves ownership; OCR's box may extend beyond it slightly.
-        top = min(t, min(floor((1-b.y-b.h)*H-y0) for b in members))
-        bottom = max(bot, max(ceil((1-b.y)*H-y0) for b in members))
-        right = max(ceil(b.x_right*W-x0) for b in members)
+        top = min(t, min(floor(((1-b.y-b.h)*H-y0)/scale) for b in members))
+        bottom = max(bot, max(ceil(((1-b.y)*H-y0)/scale) for b in members))
+        right = max(ceil((b.x_right*W-x0)/scale) for b in members)
         box = (l,top,right,bottom)
         groups[box] = (members, background)
         bare_quotes.add(box)
@@ -166,7 +173,7 @@ def extract(image, blocks, rect, max_messages=12):
     panels: dict[Box, list[Box]] = {box: [] for box in groups}
     for outer, (members, color) in list(groups.items()):
         l,t,r,bot = outer
-        inset = max(4, min(round(min((b.h*H for b in members), default=16)*.7), round(w*.04)))
+        inset = max(4, min(round(min((b.h*H/scale for b in members), default=16)*.7), round(w*.04)))
         for sy in range(t+inset, bot-inset, max(1, inset//2)):
             candidate = surface_at(l+inset, sy)
             if candidate is None: continue
@@ -201,9 +208,9 @@ def extract(image, blocks, rect, max_messages=12):
         ql,qt,qr,qb = quote_box
         quote_members = groups[quote_box][0]
         candidates = [box for box in groups if box not in detached
-                      and 0 <= qt-box[3] <= max(b.h*H for b in quote_members)*1.5
-                      and (abs(ql-box[0]) < max(b.h*H for b in quote_members)
-                           or abs(qr-box[2]) < max(b.h*H for b in quote_members))]
+                      and 0 <= qt-box[3] <= max(b.h*H/scale for b in quote_members)*1.5
+                      and (abs(ql-box[0]) < max(b.h*H/scale for b in quote_members)
+                           or abs(qr-box[2]) < max(b.h*H/scale for b in quote_members))]
         if len(candidates) == 1:
             parent = candidates[0]
             panels[parent].append(quote_box)
@@ -213,7 +220,7 @@ def extract(image, blocks, rect, max_messages=12):
     anchors: dict[str, list[int]] = {'them': [], 'me': []}
     for (l,t,r,bot), (members, color) in groups.items():
         if (l,t,r,bot) in detached: continue
-        near = min(max(b.h*H for b in members)*5, w*.30)
+        near = min(max(b.h*H/scale for b in members)*5, w*.30)
         if l < near and l*1.8 < w-r: anchors['them'].append(l)
         if w-r < near and (w-r)*1.8 < l: anchors['me'].append(r)
     messages = []
@@ -221,7 +228,7 @@ def extract(image, blocks, rect, max_messages=12):
         if (l,t,r,bot) in detached: continue
         left_gap, right_gap = l, w-r
         # Bubble padding and avatar column are measured within the selected pane.
-        near = min(max(b.h*H for b in members)*5, w*.30)
+        near = min(max(b.h*H/scale for b in members)*5, w*.30)
         side = ('them' if left_gap < near and left_gap*1.8 < right_gap else
                 'me' if right_gap < near and right_gap*1.8 < left_gap else 'unknown')
         # Compare all blocks in the same coordinate system. Per-block font
@@ -234,7 +241,7 @@ def extract(image, blocks, rect, max_messages=12):
             else:
                 rows.append([b])
         members = [b for row in rows for b in sorted(row, key=lambda b: b.x)]
-        tolerance = max(b.h*H for b in members)*.6
+        tolerance = max(b.h*H/scale for b in members)*.6
         left_match = any(abs(l-a)<tolerance for a in anchors['them'])
         right_match = any(abs(r-a)<tolerance for a in anchors['me'])
         if left_match != right_match:
@@ -242,13 +249,13 @@ def extract(image, blocks, rect, max_messages=12):
         quote_blocks, body_blocks = [], []
         mixed = False
         for b in members:
-            bx, by = b.x*W-x0, (1-b.y-b.h)*H-y0
-            if any(il <= bx and it <= by and ir >= bx+b.w*W-1 and ib >= by+b.h*H-1
+            bx, by = (b.x*W-x0)/scale, ((1-b.y-b.h)*H-y0)/scale
+            if any(il <= bx and it <= by and ir >= bx+b.w*W/scale-1 and ib >= by+b.h*H/scale-1
                    for il,it,ir,ib in panels[(l,t,r,bot)]):
                 quote_blocks.append(b)
             else:
                 body_blocks.append(b)
-                if any(bx < ir and bx+b.w*W > il and by < ib and by+b.h*H > it
+                if any(bx < ir and bx+b.w*W/scale > il and by < ib and by+b.h*H/scale > it
                        for il,it,ir,ib in panels[(l,t,r,bot)]):
                     mixed = True
         if mixed:
@@ -266,7 +273,7 @@ def extract(image, blocks, rect, max_messages=12):
             first = body_blocks[0]
             names = [b for b in unresolved
                      if abs(b.x-first.x)*W < first.h*H*1.5
-                     and 0 <= (y0+t)/H-(1-b.y) < first.h*2]
+                     and 0 <= (y0+t*scale)/H-(1-b.y) < first.h*2]
             if names:
                 # A nickname is outside a confirmed bubble, on the nearest row.
                 # Font size and text length cannot distinguish names from bodies.
@@ -284,9 +291,9 @@ def extract(image, blocks, rect, max_messages=12):
         left = min([l] + [p[0] for p in panels[(l,t,r,bot)]])
         right = max([r] + [p[2] for p in panels[(l,t,r,bot)]])
         bottom = max([bot] + [p[3] for p in panels[(l,t,r,bot)]])
-        messages.append(Message(text,side,(y0+t)/H,min(b.conf for b in members),
-            h=(bottom-t)/H,sender=sender,lines=[b.text for b in body_blocks],
-            x=(x0+left)/W,w=(right-left)/W,last_y=(y0+t)/H,
+        messages.append(Message(text,side,(y0+t*scale)/H,min(b.conf for b in members),
+            h=(bottom-t)*scale/H,sender=sender,lines=[b.text for b in body_blocks],
+            x=(x0+left*scale)/W,w=(right-left)*scale/W,last_y=(y0+t*scale)/H,
             quote=quote,quote_sender=quote_sender,content_state='mixed' if mixed else ''))
     for b in unresolved:
         messages.append(Message(b.text,'unknown',1-b.y-b.h,b.conf,
