@@ -1900,6 +1900,14 @@ class HudController(NSObject):
             if app.key == "wechat":
                 overlay_msgs = msgs
                 msgs = [m for m in msgs if m.side != "unknown"]
+            # 检测框先画：它只要几何，而下面的 observe（会话历史读写）与
+            # _context_text（8192 预算裁剪）在切换会话时最慢，压在前面会让框
+            # 迟迟不出（实测「切换对话后要等很久框才出」即此因）。纯视觉层，
+            # 提前推送不影响任何管线逻辑。
+            if self._show_boxes:
+                thems_overlay = [m for m in msgs if m.side == "them"]
+                self._push("applyBoxes:", (res["window"], overlay_msgs or msgs,
+                                           thems_overlay[-1].text if thems_overlay else None))
             visible = [chat_context.message_record(m) for m in msgs]
             self._observed_messages, self._observed_offset = visible, 0
             if self.history_enabled and self.conversations and not self.conversations.error:
@@ -1934,11 +1942,8 @@ class HudController(NSObject):
                 self._pregen_req = self._pregen_result = None
                 self._gen_epoch += 1
 
-            # YOLO overlay: repaint whenever a read produced geometry — unchanged reads reuse
-            # the cached messages, so the boxes stay up even while the pane is quiet
-            if self._show_boxes:
-                self._push("applyBoxes:", (res["window"], overlay_msgs or msgs,
-                                           newest.text if newest else None))
+            # 检测框已在 observe/上下文之前推送过（见上方注释）：一轮读屏只画一次，
+            # 未变化帧沿用缓存的 messages，安静时框也留在屏上。
             if newest is None:
                 self._push("applyWaiting:", "暂未确认输入区边界，暂停分析"
                            if res.get("input_unresolved") else None)
