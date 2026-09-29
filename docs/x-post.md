@@ -1,6 +1,6 @@
 # X（Twitter）推广文案
 
-> **发给谁**：中文推特。这工具的前提是微信，海外受众用不上 —— 英文版只当附带，别当主力。
+> **发给谁**：中文推特。这工具的前提是国内主流聊天工具，海外受众用不上 —— 英文版只当附带，别当主力。
 > **字符怎么算**：X 里汉字和全角标点算 **2**，英文算 1，链接一律算 23，免费号每条上限 **280**。
 > 下面每一条都按这个规则数过（括号里的数字就是权重占比），都 ≤ 280，免费号直接发。
 > **GIF 直传**（`docs/demo.gif`，1.2MB / 16.5s），别贴 GitHub 图片链接让 X 去抓。
@@ -20,9 +20,9 @@
 ### 1/7（140/280）· 附 GIF
 
 ```
-微信弹出一句「这个方案今天能给我吗？」
+聊天窗口弹出一句「这个方案今天能给我吗？」
 
-旁边的悬浮窗直接给答案：催进度 · 风险 4/9 · 三条候选回复，点一下就进微信输入框。
+旁边的悬浮窗直接给答案：催进度 · 风险 4/9 · 三条候选回复，点一下就进输入框。
 
 自己写的，开源了 👇
 ```
@@ -60,7 +60,7 @@
 ### 5/7（268/280）
 
 ```
-边界说清楚：不注入、不 hook、不解密微信数据库、不自动发送任何消息。对微信来说就是「屏幕上有个人在看」，没有封号风险。
+边界说清楚：不注入、不 hook、不解密聊天数据库、不自动发送任何消息。对聊天应用来说就是「屏幕上有个人在看」，没有封号风险。
 
 唯一一次写入是点「填入」，写完会读回来确认，没写进去就如实报失败。消息内容会发给写候选的那个端点；判断层全程本地不出网（生成层也能换成本地 Ollama）。
 ```
@@ -94,7 +94,7 @@ https://github.com/jev-chat/jev-chat-jarvis-mac （MIT）
 不想发 thread 就用这条，同样附 GIF —— 但**外链要放到自己下面的回复里**，不然降权。
 
 ```
-写了个 macOS 悬浮窗：微信来消息时，直接告诉你这句话什么意图、风险几级、该怎么回，点一下候选就进微信输入框。
+写了个 macOS 悬浮窗：聊天应用来消息时，直接告诉你这句话什么意图、风险几级、该怎么回，点一下候选就进输入框。
 
 纯读屏 + 本地小模型，不注入不 hook，没有封号风险。开源 MIT，链接在回复里。
 ```
@@ -106,14 +106,14 @@ https://github.com/jev-chat/jev-chat-jarvis-mac （MIT）
 给刷到这条的英文受众看的，发成 thread 的最后一条或单独发都行。
 
 ```
-Built a macOS floating panel for WeChat: OCR the chat window, judge intent + risk with a local small model (~0.7s, offline), then let any LLM draft 3 replies and re-rank them locally to kill the bad ones. Read-only — no injection, no hooks, zero ban risk. MIT 👇
+Built a macOS floating panel for chat apps: OCR the chat window, judge intent + risk with a local small model (~0.7s, offline), then let any LLM draft 3 replies and re-rank them locally to kill the bad ones. Read-only — no injection, no hooks, zero ban risk. MIT 👇
 ```
 
 ---
 
 ## 发布细节
 
-- **首帧就是封面**：X 拿 GIF 第一帧当时间线缩略图。现在是「已填入候选 #1」那一刻 —— 左边微信、右边面板（夸奖 / 安全 2/9 / 三条候选），一眼能看懂，不用另做封面。
+- **首帧就是封面**：X 拿 GIF 第一帧当时间线缩略图。现在是「已填入候选 #1」那一刻 —— 左边聊天窗口、右边面板（夸奖 / 安全 2/9 / 三条候选），一眼能看懂，不用另做封面。
 - **标签别多**：1–2 个足够（`#开源` `#macOS`）。堆标签在中文推特上像营销号，反而压触达。
 - **时间**：北京时间工作日 **12:00–13:00** 或 **21:00–23:00**，中文开发者最活跃。
 - **转发靠哪句**：「判断层完全本地、不出网」和「零封号风险」这两点是这条贴最可能被转的理由，前三条里已经各占了一个位置，别挪到后面。
