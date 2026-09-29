@@ -97,9 +97,9 @@ SLOW_TICK = 1.0          # re-check cadence while the chat pane keeps moving
 READ_FAILURE_HIDE_S = 2.0  # do not flicker on a transient capture/window miss
 EMPTY_FRAME_REUSE_S = READ_FAILURE_HIDE_S  # #58: how long an empty-OCR streak may
                                            # reuse the last read before giving up
-SETTLE_S = 1.2           # upper bound on the settle wait (anti-flood; unchanged by design)
-EARLY_SETTLE_S = 0.70    # the gate may open this early …
-STABLE_READS = 3         # … but only after this many consecutive unchanged reads
+SETTLE_S = 0.8           # upper bound on the settle wait (anti-flood; unchanged by design)
+EARLY_SETTLE_S = 0.50    # the gate may open this early …
+STABLE_READS = 2         # … but only after this many consecutive unchanged reads
 MIN_GAP_S = 2.0          # never restart analysis faster than this
 IDLE_STATUS = "等待聊天应用消息…"   # the resting status line (also set at build time)
 WARM_STATUS = "判断模型加载中…（首次需下载，可能数分钟）"  # shown while judge warm-up runs
