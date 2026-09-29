@@ -1834,11 +1834,24 @@ class HudController(NSObject):
                 from visual_fill import chat_signature
                 rect = editor.screen_rect(res['window'])
                 signature_rect = self._calibration.screen_rect(res['window'])
-                self._input_target = dict(box=None,rect=None,window=dict(res['window']),
+                # 校准模式同样优先 AX 定位：定位到就走 AX 写入（快、不覆盖剪贴板），
+                # 定位不到才回退校准框 + 复制兜底。节流期内沿用上次结果，避免 box 抖动；
+                # AX 不可用是稳态，失败后 3s 才重试，成功后 1s 刷新（与下方 AX 路径同频）。
+                now_calib = time.monotonic()
+                if now_calib >= getattr(self, "_calib_ax_next", 0):
+                    ax = app.locate_input(res["window"])
+                    if ax is not None and ax.get("box") is not None:
+                        self._calib_ax_target = (ax["box"], ax["rect"])
+                        self._calib_ax_next = now_calib + 1.0
+                    else:
+                        self._calib_ax_target = None
+                        self._calib_ax_next = now_calib + 3.0
+                ax_box, ax_rect = getattr(self, "_calib_ax_target", None) or (None, None)
+                self._input_target = dict(box=ax_box,rect=ax_rect,window=dict(res['window']),
                     visual_rect=rect,manual_region=editor,signature_rect=signature_rect,
                     chat_signature=chat_signature(res['window'],signature_rect),
                     app=app.key,   # 填入前复核：手动校准目标同样必须带归属标记（#105）
-                    reason="手动校准输入区")
+                    reason="手动校准输入区" if ax_box is None else "手动校准输入区 · AX 可写")
             self._input_window = dict(res["window"])
             self._input_next = float("inf")
             if not res.get("chat_title"):
