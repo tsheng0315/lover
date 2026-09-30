@@ -27,6 +27,7 @@ import os
 import subprocess
 import threading
 import time
+import traceback
 from pathlib import Path
 
 import AppKit
@@ -2714,7 +2715,9 @@ class HudController(NSObject):
             if local_judge:
                 self._push("applyWarmFailed:", str(e))
         except Exception as e:
-            _log(f"预热判断模型失败 {type(e).__name__}")
+            # 加载期异常栈不含消息正文（还没碰到任何消息），记全栈不违隐私口径
+            # (#109: 只打类名时无法定位是 tokenizer 还是 snapshot 文件解码失败)。
+            _log(f"预热判断模型失败 {type(e).__name__}\n{traceback.format_exc()}")
             if local_judge:
                 self._push("applyWarmFailed:",
                            "判断模型加载失败 · 可配置 TYPESAFE_API_KEY 走云端判断")
