@@ -2843,9 +2843,31 @@ def warn_if_no_generation_key() -> None:
         pass          # no osascript: the panel still shows the hint in the candidate area
 
 
-def main() -> None:
+def build_edit_main_menu() -> AppKit.NSMenu:
+    """Accessory 应用的一份隐藏主菜单，只含「编辑」四项，承担 ⌘C/⌘V/⌘X/⌘A 路由。
+
+    macOS 的快捷键不直接派发给焦点控件：系统拿着快捷键在主菜单里找挂对应动作的
+    菜单项（⌘V → paste:），再沿响应链送达焦点文本框。Accessory 应用主菜单为空，
+    设置窗口的密钥框/地址框便全部无法粘贴（#145）。菜单项刻意不设 target——设了
+    就固定发给 self，不再沿响应链找焦点控件（与状态栏菜单相反：那边的 action 是
+    自己的方法，必须设）。主菜单栏在 Accessory 模式下不显示，界面零变化。
+    """
+    main_menu = AppKit.NSMenu.alloc().init()
+    edit_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+        "编辑", None, "")
+    edit_menu = AppKit.NSMenu.alloc().initWithTitle_("编辑")
+    for title, action, key in (("剪切", "cut:", "x"), ("复制", "copy:", "c"),
+                               ("粘贴", "paste:", "v"), ("全选", "selectAll:", "a")):
+        edit_menu.addItemWithTitle_action_keyEquivalent_(title, action, key)
+    edit_item.setSubmenu_(edit_menu)
+    main_menu.addItem_(edit_item)
+    return main_menu
+
+
+def main() -> None:  # pragma: no cover — GUI 启动粘合，只有真启动才执行；菜单结构已由 build_edit_main_menu 的测试覆盖
     app = AppKit.NSApplication.sharedApplication()
     app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+    app.setMainMenu_(build_edit_main_menu())
     warn_if_no_generation_key()
     controller = HudController.alloc().init()
     # First line of every run: which backends are actually in play. Support requests
