@@ -71,6 +71,15 @@
 
 **仅支持 Apple Silicon（M 系列）Mac**，macOS 13+。不支持 Intel Mac，也不要通过 Rosetta 运行（本地判断模型依赖的 torch 没有 Intel 版本，#19）；启动时会检测并以中文提示原因。
 
+**用 Homebrew 装（推荐，免"右键打开"）**：
+
+```bash
+brew tap jev-chat/tap
+brew install --cask jev-chat/tap/jev-jarvis
+```
+
+Homebrew 下载的文件不带 quarantine 属性，装完直接打开；卸载用 `brew uninstall --cask jev-jarvis`。
+
 **只想用**：[Releases](https://github.com/jev-chat/jev-chat-jarvis-mac/releases/latest/download/jev-jarvis-macos-latest.zip) 下载 `.app`，解压拖进「应用程序」，**第一次右键 → 打开**（没做公证，双击会被 Gatekeeper 拦）。
 
 ![「已损坏，无法打开」的报错弹窗](docs/troubleshoot-damaged.png)
