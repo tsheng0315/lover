@@ -13,6 +13,7 @@
 #   ./packaging/release.sh --sign "Developer ID Application: X (TEAM)"
 #                                              # 有开发者证书才用；--sign - 是 ad-hoc（不解决 Gatekeeper）
 #   ./packaging/release.sh --publish           # 建 GitHub Release 并上传（需要 gh 已登录）
+#                                              # 发布自检通过后自动同步 Homebrew tap（Casks/jev-jarvis.rb）
 #   ./packaging/release.sh --publish --target <commit>
 #                                              # 把 release 钉在某个提交上（默认是默认分支最新提交）
 #
@@ -174,6 +175,34 @@ if [ "$PUBLISH" = 1 ]; then
         exit 1
     fi
     echo "    ✓ 稳定链接可下载（releases/latest/download/jev-jarvis-macos-latest.zip）"
+
+    # Homebrew tap 同步：漏了这步 brew 用户就永远拿不到新版，且没人记得 sha256 在哪——
+    # 所以发布脚本自己做。sha 直接取上面 shasum 生成的 SHA256SUMS，不手算。
+    echo "==> 同步 Homebrew tap"
+    TAP_DIR="$TMP/homebrew-tap"
+    # 与仓库一致的 SSH 远端（gh auth protocol 是 ssh）；https 匿名克隆 push 不动
+    if ! git clone --depth 1 git@github.com:jev-chat/homebrew-tap.git "$TAP_DIR" >/dev/null 2>&1; then
+        echo "    ✗ 克隆 homebrew-tap 失败，手动更新 Casks/jev-jarvis.rb 的 version/sha256" >&2
+        exit 1
+    fi
+    SHA="$(awk -v zip="jev-jarvis-macos-v$VERSION.zip" '$2 == zip {print $1}' "$OUT/SHA256SUMS")"
+    if [ -z "$SHA" ]; then
+        echo "    ✗ SHA256SUMS 里找不到 jev-jarvis-macos-v$VERSION.zip 这一行" >&2
+        exit 1
+    fi
+    # BSD sed（macOS 本脚本的运行平台）：-i '' 就地改
+    sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" "$TAP_DIR/Casks/jev-jarvis.rb"
+    git -C "$TAP_DIR" add Casks/jev-jarvis.rb
+    if git -C "$TAP_DIR" diff --cached --quiet; then
+        echo "    cask 已是 $VERSION，无需改动"
+    else
+        git -C "$TAP_DIR" -c user.name="eatmoreduck" -c user.email="eatmoreduck@users.noreply.github.com" commit --quiet -m "jev-jarvis $VERSION"
+        if ! git -C "$TAP_DIR" push --quiet origin HEAD; then
+            echo "    ✗ tap push 失败，手动推：cd $TAP_DIR && git push" >&2
+            exit 1
+        fi
+        echo "    ✓ tap 已更新到 $VERSION（brew users: brew upgrade 即可拿到）"
+    fi
 else
     echo
     echo "    下一步（发 GitHub Release）："
