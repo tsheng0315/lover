@@ -6,13 +6,13 @@ LOVER is a Chinese-first macOS companion for taking a breath before responding i
 
 ## Why I built LOVER
 
-The people closest to us can also be the easiest people to hurt.
+The people closest to us can also be the easiest people to hurt. I learned that lesson in my own relationship.
 
-In a close relationship, a message can arrive at exactly the wrong moment. We may already feel tired, unseen, anxious, disappointed, or defensive. A short sentence can sound like blame; a delayed reply can feel like rejection. Before we have understood what the other person is trying to say, we may reply from that first wave of emotion—and create more distance.
+There were moments when I mistook my fear for certainty. A short sentence sounded like blame; a delayed reply felt like rejection. I answered from the first wave of emotion instead of trying to understand what the other person was really asking for. I said things too quickly, and I did things that created distance where I wanted closeness.
 
-Often, neither person wants to hurt the other. They may simply be asking, in different ways, to be heard, reassured, respected, or given space.
+I still regret many of those moments. I cannot rewrite them, but I do not want that regret to become only self-punishment. I want it to become a reason to pause: to look past my first interpretation, make room for my own reaction, and ask what may be happening underneath the words before I respond.
 
-I built LOVER to create a small pause in that moment. It helps me look past the first interpretation of a message, make room for my own reaction, and consider what may be happening underneath the words before I respond.
+Often, neither person wants to hurt the other. They may simply be asking, in different ways, to be heard, reassured, respected, or given space. I built LOVER to offer that small pause when it matters most.
 
 LOVER does not decide who is right or claim to know someone’s inner world. It offers possibilities: a prompt to slow down, hold more than one interpretation, and choose a response that is clearer, kinder, and still honest.
 
