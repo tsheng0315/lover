@@ -6,13 +6,13 @@ LOVER is a Chinese-first macOS companion for taking a breath before responding i
 
 ## Why I built LOVER
 
-The people closest to us can also be the easiest people to hurt. I learned that lesson in my own relationship.
+This is not an abstract product idea. I built LOVER after learning, painfully, that the people closest to us can also be the easiest people to hurt.
 
-There were moments when I mistook my fear for certainty. A short sentence sounded like blame; a delayed reply felt like rejection. I answered from the first wave of emotion instead of trying to understand what the other person was really asking for. I said things too quickly, and I did things that created distance where I wanted closeness.
+In my own relationship, there were moments when I was afraid, hurt, or overwhelmed and mistook those feelings for certainty. A short sentence sounded like blame. A delayed reply felt like rejection. Instead of trying to understand what the other person was really asking for, I reacted to the meaning I had already given their words. I said things too quickly. I created distance when what I really wanted was closeness.
 
-I still regret many of those moments. I cannot rewrite them, but I do not want that regret to become only self-punishment. I want it to become a reason to pause: to look past my first interpretation, make room for my own reaction, and ask what may be happening underneath the words before I respond.
+I replay some of those moments more often than I want to admit. I cannot take back the words I used or undo the hurt I caused. LOVER cannot do that either. I made it first for myself because I needed something that could interrupt the version of me who reacts before listening.
 
-Often, neither person wants to hurt the other. They may simply be asking, in different ways, to be heard, reassured, respected, or given space. I built LOVER to offer that small pause when it matters most.
+Often, neither person wants to hurt the other. They may simply be asking, in different ways, to be heard, reassured, respected, or given space. I want LOVER to offer a small pause when that matters most: enough space to look past the first interpretation, make room for your own reaction, and ask what may be happening underneath the words before you respond.
 
 LOVER does not decide who is right or claim to know someone’s inner world. It offers possibilities: a prompt to slow down, hold more than one interpretation, and choose a response that is clearer, kinder, and still honest.
 
