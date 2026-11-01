@@ -11,9 +11,9 @@
 用户必须自己配，否则候选区空着 + 启动弹窗。
 """
 
-# 自建中转（One API / New API）
+# 不随应用分发任何访问密钥。请在 LOVER 的设置中填写自己的服务地址、模型与 Key。
 API_KEY = ""
-BASE_URL = "http://101.132.131.220:11111/v1"
+BASE_URL = ""
 
 # 中转换渠道时不用改这里：启动会问一次中转「现在提供哪些模型」，按下面顺序挑第一个
 # 存在的；都挑不到就取中转返回的第一个，问不到（离线／接口不兼容）才用 MODEL 硬上。
@@ -21,7 +21,6 @@ BASE_URL = "http://101.132.131.220:11111/v1"
 MODEL = "glm-4-flash"
 MODEL_PREFERENCE = ["glm-4-flash", "Qwen/Qwen3-8B"]
 
-# 端点要靠额外字段才能关思考时填这里（格式同 env 的 OPENAI_EXTRA_BODY，用户配了以 env 为准）。
-# 统一发 enable_thinking=false：Qwen3 那类默认开思考的模型不关会慢到 85 秒，而 glm-4-flash
-# 实测把它当未知字段忽略、不报错——所以这一条同时兼容两种渠道，不必按模型分开处理。
-EXTRA_BODY = '{"enable_thinking": false}'
+# 某些兼容服务需要在这里配置额外请求字段（格式同 env 的 OPENAI_EXTRA_BODY）。
+# OpenAI 官方接口不接受诸如 enable_thinking 的供应商私有字段。
+EXTRA_BODY = ""

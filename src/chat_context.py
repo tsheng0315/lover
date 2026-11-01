@@ -88,7 +88,7 @@ class Conversations:
         self._stamp = object()
         # One home for source runs and the packaged app alike — the directory that already
         # holds the venv and the env fallback (userconfig.config_dirs); tests pass paths.
-        self.path = path or Path.home() / 'Library/Application Support/jev-jarvis/conversations.json'
+        self.path = path or Path.home() / 'Library/Application Support/lover/conversations.json'
         self.reload()
 
     def _file_stamp(self, fd=None):

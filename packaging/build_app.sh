@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Build jev-jarvis.app — a native macOS bundle around the Python app.
+# Build LOVER.app — a native macOS bundle around the Python app.
 #
 # Why a launcher bundle instead of py2app/PyInstaller: freezing torch + transformers
 # produces a 2-4 GB app. This bundle stays ~100 KB: it carries the Python source and
@@ -8,16 +8,16 @@
 # What the bundle buys you (the reason to do this at all):
 #   * double-click launch, no terminal
 #   * its own TCC identity — Screen Recording / Accessibility are granted to
-#     "jev-jarvis", not to whatever terminal happened to start it
+#     "lover", not to whatever terminal happened to start it
 #   * LSUIElement: a floating helper, no Dock icon, never steals focus
 #
-# Usage:  ./packaging/build_app.sh          -> builds ./jev-jarvis.app
+# Usage:  ./packaging/build_app.sh          -> builds ./lover.app
 #         (to package the result for other people: ./packaging/release.sh)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/jev-jarvis.app"
-BUNDLE_ID="info.jevjarvis.app"
+APP="$ROOT/lover.app"
+BUNDLE_ID="app.lover.relationship"
 
 # Every local install must include and exercise the capture recovery regressions.
 # Run before replacing the previous build so a failed check leaves it intact.
@@ -70,14 +70,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>              <string>jev-chat-jarvis</string>
-    <key>CFBundleDisplayName</key>       <string>jev-chat-jarvis</string>
+    <key>CFBundleName</key>              <string>LOVER</string>
+    <key>CFBundleDisplayName</key>       <string>LOVER</string>
     <key>CFBundleIdentifier</key>        <string>${BUNDLE_ID}</string>
     <key>CFBundleVersion</key>           <string>${VERSION}</string>
     <key>JEVBuildRevision</key>          <string>${BUILD_REVISION}</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
-    <key>CFBundleExecutable</key>        <string>jev-jarvis</string>
+    <key>CFBundleExecutable</key>        <string>lover</string>
     <key>CFBundleIconFile</key>          <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>    <string>13.0</string>
     <!-- torch ships no x86_64 macOS wheel (#19): keep the app on arm64 even when
@@ -91,9 +91,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>   <true/>
     <!-- permission prompts are shown by the system; these strings explain why -->
     <key>NSScreenCaptureUsageDescription</key>
-    <string>jev-chat-jarvis 需要读取聊天窗口的画面，才能在本地识别消息文字（不上传）。</string>
+    <string>LOVER 需要读取聊天窗口的画面，才能在本地识别消息文字（不上传）。</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>jev-chat-jarvis 需要把选中的回复粘贴到聊天输入框。</string>
+    <string>LOVER 需要把选中的回复粘贴到聊天输入框。</string>
 </dict>
 </plist>
 PLIST
@@ -106,10 +106,10 @@ set -u
 export PYTHONDONTWRITEBYTECODE=1  # keep the signed app bundle immutable at runtime
 
 RES="$(cd "$(dirname "$0")" && pwd)"
-SUPPORT="$HOME/Library/Application Support/jev-jarvis"
-CONFIG="$HOME/.config/jev-jarvis"
+SUPPORT="$HOME/Library/Application Support/lover"
+CONFIG="$HOME/.config/lover"
 VENV="$SUPPORT/venv"
-LOG="$HOME/Library/Logs/jev-jarvis.log"
+LOG="$HOME/Library/Logs/lover.log"
 mkdir -p "$SUPPORT" "$(dirname "$LOG")"
 
 # Finder launches have a minimal PATH; add the usual install locations for uv
@@ -119,7 +119,7 @@ log() { print -r -- "[$(date '+%F %T')] $*" >> "$LOG"; }
 
 die() {  # show a native dialog, then exit
     log "FATAL: $1"
-    osascript -e "display alert \"jev-chat-jarvis 启动失败\" message \"$1\n\n详情: $LOG\" as critical" >/dev/null 2>&1
+    osascript -e "display alert \"LOVER 启动失败\" message \"$1\n\n详情: $LOG\" as critical" >/dev/null 2>&1
     exit 1
 }
 
@@ -131,7 +131,7 @@ fi
 if ! command -v uv >/dev/null 2>&1; then
     # non-blocking: a Finder launch has no terminal, and a silent multi-minute wait
     # for uv + deps is indistinguishable from "the app is broken"
-    osascript -e 'display notification "首次启动：正在安装 uv（约 10 MB）" with title "jev-chat-jarvis"' >/dev/null 2>&1
+    osascript -e 'display notification "首次启动：正在安装 uv（约 10 MB）" with title "LOVER"' >/dev/null 2>&1
 fi
 if ! jev_ensure_uv "$LOG"; then
     die "$JEV_UV_ERROR。也可手动运行 brew install uv 后重试。"
@@ -157,7 +157,7 @@ fi
 if [ "$ready" = 0 ]; then
     rm -rf "$VENV"
     log "正在创建虚拟环境并安装依赖（需要几分钟，请保持联网）"
-    osascript -e 'display notification "正在准备运行环境（几分钟，需联网）" with title "jev-chat-jarvis"' >/dev/null 2>&1
+    osascript -e 'display notification "正在准备运行环境（几分钟，需联网）" with title "LOVER"' >/dev/null 2>&1
     # --frozen: use the shipped uv.lock exactly, never re-resolve at runtime
     if ! uv sync --frozen --python "@PYTHON_PIN@" --project "$RES/app" --quiet >>"$LOG" 2>&1; then
         die "依赖安装失败，请查看日志"
@@ -186,7 +186,7 @@ fi
 xcrun clang -std=c11 -Os -Wall -Wextra -Werror \
     -arch arm64 \
     -mmacosx-version-min=13.0 \
-    "$ROOT/packaging/launcher.c" -o "$APP/Contents/MacOS/jev-jarvis"
+    "$ROOT/packaging/launcher.c" -o "$APP/Contents/MacOS/lover"
 
 echo "==> 生成图标"
 PY="$ROOT/.venv/bin/python"
@@ -212,9 +212,9 @@ check() {  # fail the build instead of shipping a broken bundle silently
     echo "    ✓ $1"
 }
 check "Info.plist 合法"            "plutil -lint '$APP/Contents/Info.plist'"
-check "启动器可执行"                "[ -x '$APP/Contents/MacOS/jev-jarvis' ]"
-check "启动器是原生 Mach-O"         "file '$APP/Contents/MacOS/jev-jarvis' | grep -q 'Mach-O'"
-check "启动器仅含 arm64 切片"        "lipo -archs '$APP/Contents/MacOS/jev-jarvis' | grep -qw arm64"
+check "启动器可执行"                "[ -x '$APP/Contents/MacOS/lover' ]"
+check "启动器是原生 Mach-O"         "file '$APP/Contents/MacOS/lover' | grep -q 'Mach-O'"
+check "启动器仅含 arm64 切片"        "lipo -archs '$APP/Contents/MacOS/lover' | grep -qw arm64"
 check "Info.plist 声明仅 arm64"     "plutil -extract LSArchitecturePriority.0 raw '$APP/Contents/Info.plist' | grep -q arm64"
 check "bootstrap 可执行"            "[ -x '$APP/Contents/Resources/launcher.zsh' ]"
 check "源码进包（hud.py）"          "[ -f '$APP/Contents/Resources/app/src/hud.py' ]"

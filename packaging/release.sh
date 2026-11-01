@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Package jev-jarvis for other people: build the .app, zip it, checksum it, optionally publish.
+# Package LOVER for other people: build the .app, zip it, checksum it, optionally publish.
 #
 # Why ditto instead of "访达右键压缩" or plain `zip`: ditto is the tool Apple itself uses
 # to ship bundles — it keeps POSIX permissions, extended attributes and resource forks.
@@ -8,12 +8,12 @@
 # published silently.
 #
 # Usage:
-#   ./packaging/release.sh                     # -> dist/jev-jarvis-macos-v<version>.zip + SHA256SUMS
+#   ./packaging/release.sh                     # -> dist/lover-macos-v<version>.zip + SHA256SUMS
 #   ./packaging/release.sh --out /tmp/rel      # somewhere else
 #   ./packaging/release.sh --sign "Developer ID Application: X (TEAM)"
 #                                              # 有开发者证书才用；--sign - 是 ad-hoc（不解决 Gatekeeper）
 #   ./packaging/release.sh --publish           # 建 GitHub Release 并上传（需要 gh 已登录）
-#                                              # 发布自检通过后自动同步 Homebrew tap（Casks/jev-jarvis.rb）
+#                                              # 发布自检通过后可同步自己的 Homebrew tap（Casks/lover.rb）
 #   ./packaging/release.sh --publish --target <commit>
 #                                              # 把 release 钉在某个提交上（默认是默认分支最新提交）
 #
@@ -56,7 +56,7 @@ fi
 
 echo "==> 构建 .app"
 "$ROOT/packaging/build_app.sh"
-APP="$ROOT/jev-jarvis.app"
+APP="$ROOT/lover.app"
 
 # the zip carries whatever is on disk, so say it out loud when that is not a commit
 if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
@@ -73,15 +73,15 @@ else
     echo "==> 跳过签名（本机没有开发者证书）"
 fi
 
-ZIP="$OUT/jev-jarvis-macos-v$VERSION.zip"
+ZIP="$OUT/lover-macos-v$VERSION.zip"
 rm -f "$ZIP"
 echo "==> 压缩"
-# --keepParent: the zip must contain jev-jarvis.app/ itself, so unzipping gives an app
+# --keepParent: the zip must contain lover.app/ itself, so unzipping gives an app
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 ( cd "$OUT" && shasum -a 256 "$(basename "$ZIP")" > SHA256SUMS )
 # fixed asset name so releases/latest/download/<name> is a permanent link (brew taps,
 # installers, docs): uploaded alongside the versioned zip on every release (#31)
-STABLE="$OUT/jev-jarvis-macos-latest.zip"
+STABLE="$OUT/lover-macos-latest.zip"
 cp "$ZIP" "$STABLE"
 
 TMP="$(mktemp -d)"
@@ -96,13 +96,13 @@ check() {
     fi
     echo "    ✓ $1"
 }
-check "解压得到 jev-jarvis.app"      "[ -d '$TMP/jev-jarvis.app' ]"
-check "启动器带可执行权限"            "[ -x '$TMP/jev-jarvis.app/Contents/MacOS/jev-jarvis' ]"
-check "启动器是原生 Mach-O"           "file '$TMP/jev-jarvis.app/Contents/MacOS/jev-jarvis' | grep -q 'Mach-O'"
-check "bootstrap 带可执行权限"        "[ -x '$TMP/jev-jarvis.app/Contents/Resources/launcher.zsh' ]"
-check "Info.plist 合法"             "plutil -lint '$TMP/jev-jarvis.app/Contents/Info.plist'"
-check "图标在"                      "[ -f '$TMP/jev-jarvis.app/Contents/Resources/AppIcon.icns' ]"
-check "包内 Python 版本已钉住"        "[ -f '$TMP/jev-jarvis.app/Contents/Resources/app/.python-version' ]"
+check "解压得到 lover.app"      "[ -d '$TMP/lover.app' ]"
+check "启动器带可执行权限"            "[ -x '$TMP/lover.app/Contents/MacOS/lover' ]"
+check "启动器是原生 Mach-O"           "file '$TMP/lover.app/Contents/MacOS/lover' | grep -q 'Mach-O'"
+check "bootstrap 带可执行权限"        "[ -x '$TMP/lover.app/Contents/Resources/launcher.zsh' ]"
+check "Info.plist 合法"             "plutil -lint '$TMP/lover.app/Contents/Info.plist'"
+check "图标在"                      "[ -f '$TMP/lover.app/Contents/Resources/AppIcon.icns' ]"
+check "包内 Python 版本已钉住"        "[ -f '$TMP/lover.app/Contents/Resources/app/.python-version' ]"
 
 echo "==> 完成"
 du -sh "$ZIP" | awk '{print "    zip 体积: " $1}'
@@ -125,12 +125,12 @@ if [ "$PUBLISH" = 1 ]; then
     fi
     NOTES="$TMP/notes.md"
     {
-        echo "需要 **macOS 13+**。下载即用：解压后把 \`jev-jarvis.app\` 拖进「应用程序」。"
+        echo "需要 **macOS 13+**。下载即用：解压后把 \`lover.app\` 拖进「应用程序」。"
         echo
         echo "**第一次打开**：右键（或按住 Control 点）→ 打开 → 再点「打开」。未做 Apple 公证，双击会被 Gatekeeper 拦，只需这一次。"
-        echo "若弹「**已损坏，无法打开**」（浏览器下载常见，右键无效）：终端执行 \`sudo xattr -r -d com.apple.quarantine /Applications/jev-jarvis.app\` 后再打开。"
-        echo "**第一次启动**：联网装依赖（uv 缓存命中就很快）；只需给 \`jev-jarvis\` 授予「屏幕录制」权限，然后退出重开，无需单独授权 \`python3.12\`。"
-        echo "**判断层默认跑本地模型，首次要下载约 3.8 GB**（之后离线可用）。不想下载：在 \`~/.config/jev-jarvis/env\` 里给判断层配一个 key 走云端，见 README「配置」。"
+        echo "若弹「**已损坏，无法打开**」（浏览器下载常见，右键无效）：终端执行 \`sudo xattr -r -d com.apple.quarantine /Applications/lover.app\` 后再打开。"
+        echo "**第一次启动**：联网装依赖（uv 缓存命中就很快）；只需给 \`LOVER\` 授予「屏幕录制」权限，然后退出重开，无需单独授权 \`python3.12\`。"
+        echo "**判断层默认跑本地模型，首次要下载约 3.8 GB**（之后离线可用）。不想下载：在 \`~/.config/lover/env\` 里给判断层配一个 key 走云端，见 README「配置」。"
         echo
         echo "### 本次包含"
         if git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
@@ -147,12 +147,12 @@ if [ "$PUBLISH" = 1 ]; then
             git -C "$ROOT" log --pretty='- %s' | awk 'NR<=20'
         fi
     } > "$NOTES"
-    RELEASE_ARGS=("$TAG" "$ZIP" "$STABLE" "$OUT/SHA256SUMS" --title "jev-jarvis $TAG" --notes-file "$NOTES" --latest)
+    RELEASE_ARGS=("$TAG" "$ZIP" "$STABLE" "$OUT/SHA256SUMS" --title "LOVER $TAG" --notes-file "$NOTES" --latest)
     # pin the tag: without --target gh tags the default branch tip, which may have moved
     # since the zip was built
     [ -n "$TARGET" ] && RELEASE_ARGS+=(--target "$TARGET")
     gh release create "${RELEASE_ARGS[@]}"
-    echo "    已发布 $TAG（含稳定名资产 jev-jarvis-macos-latest.zip）"
+    echo "    已发布 $TAG（含稳定名资产 lover-macos-latest.zip）"
 
     # post-publish self-check (#31): never trust the default "Latest" pointer — a late
     # hotfix of an old version would silently re-point every latest/ download URL
@@ -169,12 +169,12 @@ if [ "$PUBLISH" = 1 ]; then
     fi
     echo "    ✓ Latest 指针 = $TAG"
     slug="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
-    code="$(curl -sIL -o /dev/null -w '%{http_code}' "https://github.com/$slug/releases/latest/download/jev-jarvis-macos-latest.zip" || true)"
+    code="$(curl -sIL -o /dev/null -w '%{http_code}' "https://github.com/$slug/releases/latest/download/lover-macos-latest.zip" || true)"
     if [ "$code" != "200" ]; then
-        echo "    ✗ 稳定链接不可用（HTTP $code），检查资产 jev-jarvis-macos-latest.zip 是否上传成功" >&2
+        echo "    ✗ 稳定链接不可用（HTTP $code），检查资产 lover-macos-latest.zip 是否上传成功" >&2
         exit 1
     fi
-    echo "    ✓ 稳定链接可下载（releases/latest/download/jev-jarvis-macos-latest.zip）"
+    echo "    ✓ 稳定链接可下载（releases/latest/download/lover-macos-latest.zip）"
 
     # Homebrew tap 同步：漏了这步 brew 用户就永远拿不到新版，且没人记得 sha256 在哪——
     # 所以发布脚本自己做。sha 直接取上面 shasum 生成的 SHA256SUMS，不手算。
@@ -185,9 +185,9 @@ if [ "$PUBLISH" = 1 ]; then
         echo "    ✗ 克隆 homebrew-tap 失败，手动更新 Casks/jev-jarvis.rb 的 version/sha256" >&2
         exit 1
     fi
-    SHA="$(awk -v zip="jev-jarvis-macos-v$VERSION.zip" '$2 == zip {print $1}' "$OUT/SHA256SUMS")"
+    SHA="$(awk -v zip="lover-macos-v$VERSION.zip" '$2 == zip {print $1}' "$OUT/SHA256SUMS")"
     if [ -z "$SHA" ]; then
-        echo "    ✗ SHA256SUMS 里找不到 jev-jarvis-macos-v$VERSION.zip 这一行" >&2
+        echo "    ✗ SHA256SUMS 里找不到 lover-macos-v$VERSION.zip 这一行" >&2
         exit 1
     fi
     # BSD sed（macOS 本脚本的运行平台）：-i '' 就地改
@@ -206,6 +206,6 @@ if [ "$PUBLISH" = 1 ]; then
 else
     echo
     echo "    下一步（发 GitHub Release）："
-    echo "      gh release create v$VERSION \"$ZIP\" \"$STABLE\" \"$OUT/SHA256SUMS\" --title \"jev-jarvis v$VERSION\" --generate-notes --latest"
+    echo "      gh release create v$VERSION \"$ZIP\" \"$STABLE\" \"$OUT/SHA256SUMS\" --title \"LOVER v$VERSION\" --generate-notes --latest"
     echo "    或直接重跑：./packaging/release.sh --publish"
 fi

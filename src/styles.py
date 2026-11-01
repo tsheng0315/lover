@@ -17,14 +17,14 @@ import userconfig
 
 # How many candidates one generation call can produce. The HUD shows exactly this many
 # dropdowns; the panel's candidate area is built for this many rows.
-MAX_SLOTS = 3
+MAX_SLOTS = 1
 
 # Candidates per tone. Each tone gets its own request (they run concurrently), and the
 # replies in one response are the same voice at different levels of nerve. The setting is
 # read once at startup so the HUD, prompt and parser all use the same row count.
-DEFAULT_PER_TONE = 2
+DEFAULT_PER_TONE = 1
 MIN_PER_TONE = 1
-MAX_PER_TONE = 5
+MAX_PER_TONE = 1
 
 
 def candidate_count(raw: str | None) -> int:
@@ -41,9 +41,9 @@ def validate_candidate_count(raw: str) -> int:
     try:
         value = int(str(raw).strip())
     except (TypeError, ValueError):
-        raise ValueError("每种话术候选数必须是 1 到 5 的整数") from None
+        raise ValueError("关系理解卡片固定为 1 条") from None
     if not MIN_PER_TONE <= value <= MAX_PER_TONE:
-        raise ValueError("每种话术候选数必须是 1 到 5 的整数")
+        raise ValueError("关系理解卡片固定为 1 条")
     return value
 
 
@@ -128,10 +128,16 @@ BUILTIN: dict[str, str] = {
     ),
 }
 
-# What the panel starts with. The third slot used to default to 不用; users were found
-# opening it and picking 阴阳怪气 by hand every session, so the default now ships it on —
-# hud.py caps the list at MAX_SLOTS, so this can grow without touching the panel build.
-DEFAULT_SLOTS: list[str] = ["高情商话术", "贴吧老哥 v1.0", "阴阳怪气"]
+# LOVER uses one reflection card rather than several reply personas.  Keep the legacy
+# presets above in source history, but do not expose them in the relationship UI.
+BUILTIN = {
+    "关系理解": (
+        "以温和、非诊断的方式帮助用户理解这段关系对话。承认不确定性，不替任何一方"
+        "读心，不判断谁对谁错；先给用户的感受留空间，再提供可选择的柔和表达。"
+    ),
+}
+
+DEFAULT_SLOTS: list[str] = ["关系理解"]
 NONE_LABEL = "不用"          # the third dropdown's way of saying "only two candidates"
 
 CUSTOM_VAR = "JEV_TONES"     # env var holding user-defined tones
@@ -171,8 +177,10 @@ def _custom_tones() -> dict[str, str]:
     return out
 
 
-CUSTOM: dict[str, str] = _custom_tones()
-PRESETS: dict[str, str] = {**BUILTIN, **CUSTOM}
+# This mode has one fixed reflection flow.  Custom reply personas are intentionally not
+# surfaced: users should get understanding before wording, rather than choose a voice.
+CUSTOM: dict[str, str] = {}
+PRESETS: dict[str, str] = BUILTIN
 
 def _label_alternation() -> str:
     """The labels as one regex alternative, with spaces and 「·」 made optional.

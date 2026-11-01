@@ -14,31 +14,33 @@ def rgb(hex_code: int, alpha: float = 1.0) -> A.NSColor:
     )
 
 
-# Native light vibrancy with cool ink, quiet metadata and semantic accents.
+# LOVER's dark-plum palette comes from the companion reflection UI: it makes the
+# floating panel feel like a private pause rather than an operational alert.
 PALETTE = {
-    "bg": rgb(0xF5F9F8, 0.74),
-    "text": rgb(0x102142),
-    "muted": rgb(0x6F7D94),
-    "accent": rgb(0x0B8A4A),
-    "green": rgb(0x00B95F),
-    "amber": rgb(0xF0A000),
-    "red": rgb(0xF05252),
-    "surface": rgb(0xFFFFFF, 0.36),
-    "row": rgb(0xFFFFFF, 0.24),
-    "field": rgb(0xFFFFFF, 0.42),
-    "edge": rgb(0xFFFFFF, 0.72),
-    "track": rgb(0xB8C1C6, 0.42),
+    "bg": rgb(0x1B0B18),
+    "text": rgb(0xFFF9FC),
+    "muted": rgb(0xD9C5D2),
+    "accent": rgb(0xFFB7CF),
+    "lavender": rgb(0xD8D9FF),
+    "green": rgb(0x4ADE80),
+    "amber": rgb(0xFBBF24),
+    "red": rgb(0xFB7185),
+    "surface": rgb(0x3A1730),
+    "row": rgb(0x2A1022),
+    "field": rgb(0x24101E),
+    "edge": rgb(0xA26182),
+    "track": rgb(0x74425F),
 }
 
 # Opaque layers need their own contrast; white-on-white vibrancy colors disappear
 # when macOS substitutes a solid backdrop for Reduce Transparency.
 SOLID_PALETTE = {
-    "bg": rgb(0xE7EEEB),
-    "surface": rgb(0xFFFFFF),
-    "row": rgb(0xF5F8F6),
-    "field": rgb(0xEAF1ED),
-    "edge": rgb(0xC5D2CB),
-    "track": rgb(0xD3DED8),
+    "bg": rgb(0x1B0B18),
+    "surface": rgb(0x3A1730),
+    "row": rgb(0x2A1022),
+    "field": rgb(0x24101E),
+    "edge": rgb(0x74425F),
+    "track": rgb(0x74425F),
 }
 
 RADIUS_FIELD = 8

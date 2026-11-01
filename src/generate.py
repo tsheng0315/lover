@@ -148,18 +148,40 @@ THINKING_ONLY_HINT = ("思考型 {model}：额度被思考耗尽，正文 0 条�
 # could send as-is and the second is where the persona gets to breathe. Measured on the
 # built-in tones: 卑微乙方's pair goes from two polite apologies to "收到收到…" plus
 # "您息怒我马上跪着改完给您磕头了", and 贴吧老哥 picks up "我自己看了都想删号".
-PROMPT_ONE = """刚收到一条聊天消息，你要帮我回。
+PROMPT_ONE = """You are LOVER, a gentle companion for reflecting on intimate-relationship conversations.
 
-{context_line}消息：「{message}」
-{intent_line}
-请写 {n} 条回复候选，语气统一成下面这一种：
-「{tone}」{instruction}
+{context_line}The other person just said: “{message}”
+{intent_line}{language_instruction}
 
-硬性要求：
-- {variation}
-- 每条不超过 30 个字，是聊天软件里打字的语气，不要客套话、不要解释
-- 只输出 {n} 行，每行一条，不要编号、不要引号、不要任何前后缀
-- 不要写出语气名称（不要写「{tone}：」这类前缀），直接从回复内容开始"""
+Return one JSON object with these fields: user_emotion, surface_message, possible_need,
+other_possible_emotion, likely_impact, how_it_may_land, next_step, pause_prompt,
+language_cues, calmer_words. Every field except language_cues is a short string;
+language_cues is an array of strings. Return no Markdown fence or extra commentary.
+
+Field meanings:
+- user_emotion: make space for the user's possible feelings before trying to fix anything;
+- surface_message: what the message says on its surface;
+- possible_need and other_possible_emotion: a tentative need the other person may want heard,
+  and a tentative feeling they may have;
+- likely_impact and how_it_may_land: what it may stir in the user and how a response may land;
+- next_step and pause_prompt: one small step before replying and one non-shaming pause question;
+- language_cues: only words, tone, or structure actually observable in the message; use [] if none;
+- calmer_words: one optional, gentler way to speak without abandoning oneself or becoming preachy.
+
+Do not diagnose personality, attachment style, manipulation, or abuse. Do not claim to know
+either person's inner state, and do not decide who is right or wrong."""
+
+
+def _language_instruction(message: str) -> str:
+    """Tell the model exactly which language the reflection must use.
+
+    Chinese messages often contain Latin names, URLs, or product names, so any CJK content
+    makes Chinese the safer choice. For every other language, asking for the message's own
+    language preserves English and other Latin-script conversations without a language SDK.
+    """
+    if re.search(r"[\u3400-\u9fff]", message):
+        return "Write every value in Simplified Chinese; do not switch to English."
+    return "Write every value in exactly the same language as the input message."
 
 
 def _variation_instruction(count: int) -> str:
@@ -344,7 +366,7 @@ def load_credentials() -> tuple[str, str, str, str, str]:
     return base, "", model, "none", pick_api_format(base, None)
 
 
-def _extra_params() -> dict:
+def _extra_params(base: str = "") -> dict:
     """Extra request-body fields from OPENAI_EXTRA_BODY (a JSON object).
 
     Some endpoints need a switch the OpenAI shape has no field for: an unswitched Qwen3
@@ -360,7 +382,17 @@ def _extra_params() -> dict:
         extra = json.loads(raw)
     except ValueError:
         return {}
-    return extra if isinstance(extra, dict) else {}
+    if not isinstance(extra, dict):
+        return {}
+
+    # `enable_thinking` is used by a few OpenAI-compatible relays, but is not an
+    # OpenAI API parameter. Sending it to api.openai.com makes every request fail
+    # with HTTP 400 and leaves the HUD with no candidate to show.
+    host = (urllib.parse.urlparse(base).hostname or "").lower()
+    if host == "api.openai.com":
+        extra = {key: value for key, value in extra.items()
+                 if key != "enable_thinking"}
+    return extra
 
 
 def credential_status() -> str:
@@ -439,7 +471,7 @@ class Generator:
         url = _endpoint(base, "openai")
         body = {"model": model, "max_tokens": 300, "temperature": 0.9,
                 "messages": [{"role": "user", "content": prompt}]}
-        body.update(_extra_params())
+        body.update(_extra_params(base))
         headers = {"content-type": "application/json", "authorization": f"Bearer {key}"}
         if on_delta is not None:
             return self._stream_openai(url, headers, body, model, alt, on_delta)
@@ -529,6 +561,46 @@ class Generator:
                 out.append(s.strip())
         return out
 
+    @staticmethod
+    def _parse_reflection(raw: str) -> list[str]:
+        """Turn the Web LOVER response schema into the native panel's reading hierarchy."""
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned,
+                             flags=re.IGNORECASE | re.DOTALL).strip()
+        try:
+            data = json.loads(cleaned)
+        except (TypeError, ValueError):
+            # A provider may ignore JSON mode. Keep the response readable rather than
+            # dropping a potentially useful reflection.
+            lines = [line.strip() for line in raw.splitlines() if line.strip()]
+            return ["\n".join(lines)] if lines else []
+        if not isinstance(data, dict):
+            return []
+
+        def text(key: str) -> str:
+            value = data.get(key)
+            return value.strip() if isinstance(value, str) else ""
+
+        def section(title: str, values: list[str]) -> str:
+            body = "\n".join(v for v in values if v)
+            return f"{title}\n{body}" if body else ""
+
+        cues = data.get("language_cues")
+        cue_lines = [f"• {v.strip()}" for v in cues if isinstance(v, str) and v.strip()] \
+            if isinstance(cues, list) else []
+        sections = [
+            section("先给你的感受一点空间", [text("user_emotion")]),
+            section("一起读这段话", [text("surface_message"), text("possible_need"),
+                                      text("other_possible_emotion")]),
+            section("回应前，先做这一小步", [text("likely_impact"), text("how_it_may_land"),
+                                             text("next_step"), text("pause_prompt")]),
+            section("我注意到的语言线索", cue_lines),
+            section("不失去自己，也换一种更柔和的说法", [text("calmer_words")]),
+        ]
+        card = "\n\n".join(part for part in sections if part)
+        return [card] if card else []
+
     def _one_tone(self, message: str, intent: str, tone: str,
                   context: str | None = None,
                   on_line=None) -> tuple[list[str], str]:
@@ -540,13 +612,15 @@ class Generator:
         """
         # The recent turns go in with their speakers ("王总: …"), because a reply that fits
         # the last two sentences is usually not a reply to this one sentence in isolation.
-        context_line = f"最近的对话：\n{context}\n\n" if context else ""
-        intent_line = f"判断出的意图：{intent}\n" if intent else ""
+        context_line = f"Recent conversation:\n{context}\n\n" if context else ""
+        intent_line = f"Observed interaction signal: {intent}\n" if intent else ""
         prompt = PROMPT_ONE.format(message=message, context_line=context_line,
                                    intent_line=intent_line,
+                                   language_instruction=_language_instruction(message),
                                    n=styles.PER_TONE, tone=tone,
                                    instruction=styles.PRESETS[tone],
                                    variation=_variation_instruction(styles.PER_TONE))
+        is_reflection = tone == "关系理解"
         emitted = 0
         buf = ""                 # fragments since the last newline
 
@@ -561,24 +635,41 @@ class Generator:
                         on_line(text)
 
         try:
-            raw = self._call(prompt, on_delta if on_line is not None else None)
+            # A reflection is one coherent card, so stream it only when the complete
+            # structure is ready.  Streaming line-by-line would make it look like eight
+            # independent reply choices.
+            raw = self._call(prompt, None if is_reflection else
+                             (on_delta if on_line is not None else None))
         except ThinkingOnlyError as e:
             return [], "模型仅返回思考内容，请关闭思考模式或更换模型"
         except urllib.error.HTTPError as e:
-            return [], f"HTTP {e.code}：请检查模型服务设置"
+            # Providers return the actionable reason in a JSON body. Keep this short and
+            # never log request text or credentials.
+            detail = ""
+            try:
+                body = json.loads(e.read().decode("utf-8", errors="replace"))
+                error = body.get("error") if isinstance(body, dict) else None
+                if isinstance(error, dict):
+                    detail = str(error.get("message") or error.get("code") or "")
+                elif isinstance(error, str):
+                    detail = error
+            except Exception:
+                pass
+            return [], f"HTTP {e.code}：{detail[:160] or '请检查模型服务设置'}"
         except Exception as e:
             return [], type(e).__name__
-        if on_line is not None:
+        parser = self._parse_reflection if is_reflection else self._parse
+        if on_line is not None and not is_reflection:
             # Sync the callback with the authoritative parse. Two ways lines can be
             # missing from what the stream emitted: the model often stops without a
             # trailing newline (the last line sits in `buf`), and a gateway that fell
             # back to one-shot JSON streams nothing at all. Either way the remaining
             # lines go out here, so the panel shows them at this request's end rather
             # than waiting for ranking.
-            for text in self._parse(raw)[emitted:styles.PER_TONE]:
+            for text in parser(raw)[emitted:styles.PER_TONE]:
                 emitted += 1
                 on_line(text)
-        return self._parse(raw)[:styles.PER_TONE], ""
+        return parser(raw)[:styles.PER_TONE], ""
 
     def generate(self, message: str, intent: str = "",
                  slot_tones: list[str] | None = None,

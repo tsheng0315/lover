@@ -7,6 +7,10 @@
 *.key
 *.pem
 *.p12
+*.p8
+id_rsa*
+credentials*.json
+service-account*.json
 config.local.json
 
 # ══════════════════════════════════════════════════════════════

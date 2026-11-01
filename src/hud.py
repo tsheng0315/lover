@@ -67,7 +67,7 @@ from Foundation import (NSMutableAttributedString, NSMakeRange, NSMakeRect,
 sys.path.insert(0, str(Path(__file__).parent))
 import userconfig  # noqa: E402
 
-userconfig.load()   # ~/.config/jev-jarvis/env -> os.environ (Finder apps inherit none)
+userconfig.load()   # ~/.config/lover/env -> os.environ (Finder apps inherit none)
 
 from perception import (  # noqa: E402
     find_wechat_window,
@@ -102,19 +102,68 @@ SETTLE_S = 0.8           # upper bound on the settle wait (anti-flood; unchanged
 EARLY_SETTLE_S = 0.50    # the gate may open this early …
 STABLE_READS = 2         # … but only after this many consecutive unchanged reads
 MIN_GAP_S = 2.0          # never restart analysis faster than this
-IDLE_STATUS = "等待聊天应用消息…"   # the resting status line (also set at build time)
-WARM_STATUS = "判断模型加载中…（首次需下载，可能数分钟）"  # shown while judge warm-up runs
+IDLE_STATUS = "Waiting for a chat message…"   # the resting status line (also set at build time)
+WARM_STATUS = "Loading the analysis model… (the first download may take a few minutes)"
+
+INTENT_DISPLAY = {
+    "表达受伤": "Expressing hurt",
+    "寻求连接": "Seeking connection",
+    "边界冲突": "Boundary conflict",
+    "防御升级": "Escalating defensiveness",
+    "回避或冷却": "Withdrawing or cooling down",
+    "修复尝试": "Attempting repair",
+    "日常互动": "Everyday interaction",
+}
+
+
+# The local judge is optional: on smaller-memory Macs it deliberately refuses to load
+# rather than allowing macOS to terminate the app.  Keep the HUD useful in that case
+# with a deliberately conservative, on-device estimate.  This is not used when the
+# judge is available, and it never leaves the process.
+_TENSION_HIGH_CUES = (
+    "分手", "离婚", "滚", "别联系", "闭嘴", "受够", "恶心", "骗子", "恨你", "永远别",
+    "break up", "divorce", "leave me alone", "shut up", "i hate you",
+)
+_TENSION_MID_CUES = (
+    "难过", "委屈", "生气", "不舒服", "失望", "不理解", "为什么", "怎么又", "别这样",
+    "晚点再聊", "冷静", "不尊重", "hurt", "sad", "upset", "angry", "disappointed",
+    "uncomfortable", "not fair", "need space", "talk later",
+)
+
+
+def _fallback_tension(text: str) -> int:
+    """Return a cautious 1–9 tension estimate when the optional judge is unavailable."""
+    message = (text or "").casefold()
+    if any(cue in message for cue in _TENSION_HIGH_CUES):
+        return 8
+    if any(cue in message for cue in _TENSION_MID_CUES):
+        return 5
+    # Repeated forceful punctuation is a weaker cue than the language above, but it is
+    # enough to avoid calling an overtly heated line "low".
+    if message.count("!") + message.count("！") >= 2:
+        return 5
+    return 2
+
+
+def _intent_display(intent: str) -> str:
+    """Keep model-facing Chinese labels stable while presenting an English interface."""
+    return INTENT_DISPLAY.get(intent, intent)
 
 
 # Shared with the settings window so both surfaces keep one visual vocabulary.
 PALETTE = ui_style.PALETTE
 _rgb = ui_style.rgb
 
-# Compact reply rows: probability rail, fully wrapped reply, then the two existing actions.
+# Compact reply rows: probability rail and fully wrapped reply content.
 # Only the minimum is fixed. _relayout() measures each candidate and grows the row as needed.
 CAND_ROW_X, CAND_ROW_W, CAND_ROW_MIN_H = 20, PANEL_W - 40, 50
 CAND_PROB_X, CAND_PROB_W = 30, 44
 CAND_TEXT_X, CAND_TEXT_W = 82, 144
+# Relationship cards are reading content, not action rows: use the space freed by the
+# hidden probability rail and copy/fill controls.
+CARD_TEXT_X = CAND_ROW_X + 14
+CARD_TEXT_W = CAND_ROW_W - 28
+CARD_ROW_MIN_H = 76
 CAND_BTN_W, CAND_BTN_H, CAND_BTN_GAP = 48, 22, 4
 CAND_BTN_X = PANEL_W - 26 - (2 * CAND_BTN_W + CAND_BTN_GAP)
 CAND_ROW_GAP = 4
@@ -131,11 +180,11 @@ GROUP_GAP = 10            # between one group's rows and the next group's dropdo
 BOTTOM_PAD = 14           # below the last group
 
 
-LOG_PATH = Path.home() / "Library" / "Logs" / "jev-jarvis.log"
+LOG_PATH = Path.home() / "Library" / "Logs" / "lover.log"
 
 
 def _log(msg: str) -> None:
-    """One line per stage: to stdout, and into ~/Library/Logs/jev-jarvis.log.
+    """One line per stage: to stdout, and into ~/Library/Logs/lover.log.
 
     "It feels slow" is not actionable on its own, so every analysis prints what each stage
     cost; that is the whole point of this function. Deliberately **no message text and no
@@ -246,6 +295,8 @@ class HudController(NSObject):
         self._fixed: list = []          # (control, x, dy_from_top, w, h) — the rows above
         self._detail_views: list = []   # non-data chrome hidden with the expanded details
         self._risk_dots: list = []      # low / medium / high indicators, presentation only
+        self._tension_views: list = []  # only shown for the message currently being judged
+        self._tension_visible = False
         self._group_top = 0             # where the first group starts, from the top
         self._title_h = 28              # measured right after the panel is built
         self.cand_texts: list[str | None] = [None] * (styles.MAX_SLOTS * styles.PER_TONE)
@@ -329,7 +380,7 @@ class HudController(NSObject):
         # title bar above a white panel.
         self.panel.setAppearance_(NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameAqua))
         self.panel.setBackgroundColor_(NSColor.clearColor())
-        self.panel.setTitle_("jev-jarvis")
+        self.panel.setTitle_("LOVER")
         self.panel.setHidesOnDeactivate_(False)
         self.panel.setBecomesKeyOnlyIfNeeded_(True)
 
@@ -391,67 +442,69 @@ class HudController(NSObject):
         view.addSubview_(self.calibration_button)
         self._fixed.append((self.calibration_button, PANEL_W - 80, 4, 32, 32))
 
+        # A small, persistent brand signature turns the pause before replying into a
+        # recognisable LOVER moment without displacing the active chat context.
+        heart = self._make_label(0, 0, 24, 22, size=20, color=PALETTE["accent"], bold=True)
+        heart.setStringValue_("♥")
+        view.addSubview_(heart)
+        self._fixed.append((heart, 20, 10, 24, 22))
+        brand = self._make_label(0, 0, 76, 20, size=16, color=PALETTE["text"], bold=True)
+        brand.setStringValue_("LOVER")
+        view.addSubview_(brand)
+        self._fixed.append((brand, 50, 12, 76, 20))
+        tagline = self._make_label(0, 0, 150, 18, size=11, color=PALETTE["muted"])
+        tagline.setStringValue_("Don’t forget love")
+        view.addSubview_(tagline)
+        self._fixed.append((tagline, 130, 14, 150, 18))
+
         # Decorative surfaces are fixed; every string still comes from the existing rows.
         for surface, x, top, w, h in (
-            (self._make_surface(12, PALETTE["surface"]), 14, 54, PANEL_W - 28, 62),
-            (self._make_surface(12, PALETTE["surface"]), 14, 124, PANEL_W - 28, 72),
-            (self._make_surface(10, PALETTE["surface"]), 14, 204, PANEL_W - 28, 34),
+            (self._make_surface(12, PALETTE["surface"]), 14, 74, PANEL_W - 28, 62),
         ):
-            if top == 54:
+            if top == 74:
                 self._message_surface = surface
             view.addSubview_(surface)
             self._fixed.append((surface, x, top, w, h))
             self._detail_views.append(surface)
 
-        # Summary separators and static labels carry no model data; they only make the
-        # existing intent/risk/action fields scan like the approved design.
-        for x in (150, 260):
-            divider = self._make_surface(0, PALETTE["edge"])
-            view.addSubview_(divider)
-            self._fixed.append((divider, x, 136, 1, 46))
-            self._detail_views.append(divider)
-
-        action_label = self._make_label(0, 0, 58, 16, size=11,
-                                        color=PALETTE["text"], bold=True)
-        action_label.setStringValue_("具体行动")
-        view.addSubview_(action_label)
-        self._fixed.append((action_label, 26, 213, 58, 16))
-        self._detail_views.append(action_label)
-
-        risk_title = self._make_label(0, 0, 64, 14, size=9, color=PALETTE["muted"])
-        risk_title.setStringValue_("风险等级")
+        # Tension is an unobtrusive reading cue, not a second card competing with the
+        # message or reflection. It deliberately sits on the panel background.
+        risk_title = self._make_label(0, 0, 160, 14, size=10, color=PALETTE["muted"], bold=True)
+        risk_title.setAlignment_(AppKit.NSTextAlignmentCenter)
+        risk_title.setStringValue_("对话紧张度")
         view.addSubview_(risk_title)
-        self._fixed.append((risk_title, 272, 132, 64, 14))
+        self._fixed.append((risk_title, 100, 146, 160, 14))
         self._detail_views.append(risk_title)
-        for i, (title, color) in enumerate((
-            ("低", PALETTE["green"]), ("中", PALETTE["amber"]), ("高", PALETTE["red"]))):
-            center_x = 278 + i * 26
-            dot = self._make_surface(4, color.colorWithAlphaComponent_(0.68))
-            view.addSubview_(dot)
-            self._fixed.append((dot, center_x - 4, 152, 8, 8))
-            self._detail_views.append(dot)
-            self._risk_dots.append(dot)
-            label = self._make_label(0, 0, 20, 14, size=9, color=PALETTE["muted"])
-            label.setAlignment_(AppKit.NSTextAlignmentCenter)
-            label.setStringValue_(title)
-            view.addSubview_(label)
-            self._fixed.append((label, center_x - 10, 164, 20, 14))
-            self._detail_views.append(label)
+        self._tension_views.append(risk_title)
+        dot = self._make_surface(5, PALETTE["muted"].colorWithAlphaComponent_(0.72))
+        view.addSubview_(dot)
+        self._fixed.append((dot, 142, 169, 10, 10))
+        self._detail_views.append(dot)
+        self._risk_dots.append(dot)
+        self._tension_views.append(dot)
+        self._tension_value = self._make_label(0, 0, 90, 16, size=12,
+                                                color=PALETTE["muted"], bold=True)
+        self._tension_value.setStringValue_("评估中")
+        view.addSubview_(self._tension_value)
+        self._fixed.append((self._tension_value, 164, 166, 90, 16))
+        self._detail_views.append(self._tension_value)
+        self._tension_views.append(self._tension_value)
 
         for key, x, top, w, h, size, color, bold in (
-            ("chat", 20, 14, PANEL_W - 112, 20, 15, PALETTE["accent"], True),
-            ("status", 20, 36, PANEL_W - 40, 14, 10, PALETTE["muted"], False),
-            ("message", 22, 82, PANEL_W - 44, 38, 14, PALETTE["text"], False),
-            ("sender", 22, 62, PANEL_W - 112, 14, 10, PALETTE["muted"], False),
-            ("intent", 26, 136, 116, 26, 20, PALETTE["text"], True),
-            ("confidence", 26, 166, 116, 16, 11, PALETTE["muted"], False),
-            ("risk", 164, 137, 92, 24, 14, PALETTE["green"], True),
-            ("actions", 94, 213, 236, 16, 11, PALETTE["text"], False),
+            ("chat", 20, 36, PANEL_W - 112, 18, 13, PALETTE["accent"], True),
+            ("status", 20, 56, PANEL_W - 40, 14, 10, PALETTE["muted"], False),
+            ("message", 22, 102, PANEL_W - 44, 38, 14, PALETTE["text"], False),
+            ("sender", 22, 82, PANEL_W - 112, 14, 10, PALETTE["muted"], False),
+            ("intent", 0, 0, 0, 0, 20, PALETTE["text"], True),
+            ("confidence", 0, 0, 0, 0, 11, PALETTE["muted"], False),
+            ("risk", 0, 0, 0, 0, 14, PALETTE["green"], True),
         ):
             tf = self._make_label(x, 0, w, h, size=size, color=color, bold=bold)
-            if key in {"message", "actions"}:
+            if key == "message":
                 tf.cell().setWraps_(True)
             self.rows[key] = tf
+            if key in {"intent", "confidence", "risk"}:
+                tf.setHidden_(True)
             if key == "message":
                 tf.cell().setScrollable_(False)
                 tf.cell().setUsesSingleLineMode_(False)
@@ -470,24 +523,24 @@ class HudController(NSObject):
             else:
                 view.addSubview_(tf)
                 self._fixed.append((tf, x, top, w, h))
-            if key not in {"chat", "status"}:
+            if key not in {"chat", "status", "intent", "confidence", "risk"}:
                 self._detail_views.append(tf)
 
         self._message_toggle = self._make_button(PANEL_W - 82, 0, 60, 18,
                                                   "展开 ▾", "toggleMessage:", 0)
         self._message_toggle.setAccessibilityLabel_("展开或收起完整消息")
         view.addSubview_(self._message_toggle)
-        self._fixed.append((self._message_toggle, PANEL_W - 82, 60, 60, 18))
+        self._fixed.append((self._message_toggle, PANEL_W - 82, 80, 60, 18))
         self._detail_views.append(self._message_toggle)
 
         header = self._make_label(18, 0, PANEL_W - 36, 18,
                                   size=12, color=PALETTE["text"], bold=True)
         view.addSubview_(header)
         self.rows["cand_header"] = header
-        self._set_candidate_header("候选回复（按合适度排序）")
-        self._fixed.append((header, 18, 250, PANEL_W - 36, 18))
+        self._set_candidate_header("关系理解卡片")
+        self._fixed.append((header, 18, 190, PANEL_W - 36, 18))
         self._detail_views.append(header)
-        self._group_top = 274
+        self._group_top = 214
 
         # ---- 话术 groups: each dropdown heads a group and its candidates sit underneath,
         # so the tone is labelled by the thing that selects it. Every group's controls exist
@@ -509,11 +562,12 @@ class HudController(NSObject):
             pop.setBordered_(False)          # <- no bezel, no accent-coloured chevron
             # the one discoverability aid the flat field gets: grey-on-grey reads as text,
             # a tooltip costs nothing visually and answers "can I click this?"
-            pop.setToolTip_("点这里换话术（每种一组，各出 2 条）")
+            pop.setToolTip_("关系理解卡片")
             pop.setFont_(NSFont.boldSystemFontOfSize_(TONE_DD_FONT))
             pop.setContentTintColor_(PALETTE["text"])
             pop.addItemsWithTitles_(tone_items)
             pop.selectItemWithTitle_(self.slot_tones[slot])
+            pop.setEnabled_(False)  # LOVER has one fixed relationship-understanding flow.
             pop.setTarget_(self)
             pop.setAction_("toneChanged:")
             view.addSubview_(pop)
@@ -557,9 +611,9 @@ class HudController(NSObject):
         self._detail_views.append(self.reanalyze_button)
 
         self.regenerate_button = self._make_button(
-            118, 0, PANEL_W - 132, 28, "重新生成推荐回答", "regenerateReply:", 0)
-        self.regenerate_button.setAccessibilityLabel_("重新生成推荐回答")
-        self.regenerate_button.setToolTip_("沿用当前消息和判断结果，只重新生成候选回答")
+            118, 0, PANEL_W - 132, 28, "重新理解这段话", "regenerateReply:", 0)
+        self.regenerate_button.setAccessibilityLabel_("重新理解这段话")
+        self.regenerate_button.setToolTip_("沿用当前消息和上下文，重新生成关系理解卡片")
         view.addSubview_(self.regenerate_button)
         self._detail_views.append(self.regenerate_button)
 
@@ -640,17 +694,21 @@ class HudController(NSObject):
                 r = self._rows[slot][row]
                 controls = self._row_controls(slot, row)
                 if active:
+                    is_reflection = self.slot_tones[slot] == "关系理解"
                     # The candidate decides its own height. Short replies keep the compact
                     # minimum; longer localized text grows without truncation.
-                    text_h = self._candidate_text_height(r["text"])
-                    row_h = max(CAND_ROW_MIN_H, text_h + 12)
+                    text_w = CARD_TEXT_W if is_reflection else CAND_TEXT_W
+                    text_x = CARD_TEXT_X if is_reflection else CAND_TEXT_X
+                    text_h = self._candidate_text_height(r["text"], text_w)
+                    row_h = max(CARD_ROW_MIN_H if is_reflection else CAND_ROW_MIN_H,
+                                text_h + (20 if is_reflection else 12))
                     text_top = dy + (row_h - text_h) / 2
                     button_top = dy + (row_h - CAND_BTN_H) / 2
                     metric_top = dy + (row_h - 40) / 2
                     progress_w = max(0.0, min(36.0, r["fill"].frame().size.width))
                     placements += [
                         (r["box"], CAND_ROW_X, dy, CAND_ROW_W, row_h),
-                        (r["text"], CAND_TEXT_X, text_top, CAND_TEXT_W, text_h),
+                        (r["text"], text_x, text_top, text_w, text_h),
                         (r["prob"], CAND_PROB_X, metric_top, CAND_PROB_W, 32),
                         (r["btn"], CAND_BTN_X, button_top, CAND_BTN_W, CAND_BTN_H),
                         (r["fill_btn"], CAND_BTN_X + CAND_BTN_W + CAND_BTN_GAP, button_top,
@@ -715,7 +773,7 @@ class HudController(NSObject):
         if close:
             close.setTarget_(self)
             close.setAction_("quitApp:")
-            close.setToolTip_("退出 jev-jarvis")
+            close.setToolTip_("退出 LOVER")
         if mini:
             mini.setTarget_(self)
             mini.setAction_("collapsePanel:")
@@ -729,7 +787,7 @@ class HudController(NSObject):
         bar = AppKit.NSStatusBar.systemStatusBar()
         self.status_item = bar.statusItemWithLength_(AppKit.NSVariableStatusItemLength)
         self.status_item.button().setTitle_("J")
-        self.status_item.button().setToolTip_("jev-jarvis · 聊天意图助手")
+        self.status_item.button().setToolTip_("LOVER · 关系沟通助手")
 
         menu = AppKit.NSMenu.alloc().init()
         for title, action, key in (
@@ -744,7 +802,7 @@ class HudController(NSObject):
         ):
             menu.addItemWithTitle_action_keyEquivalent_(title, action, key)
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
-        menu.addItemWithTitle_action_keyEquivalent_("退出 jev-jarvis", "quitApp:", "q")
+        menu.addItemWithTitle_action_keyEquivalent_("退出 LOVER", "quitApp:", "q")
         for item in menu.itemArray():
             item.setTarget_(self)
         self.pause_item = menu.itemArray()[1]
@@ -865,7 +923,10 @@ class HudController(NSObject):
                     return replacement
             return color  # risk/status colors retain their semantic meaning
 
-        background = ui_style.SOLID_PALETTE["bg"] if reduced else NSColor.clearColor()
+        # The reflection surface contains long-form reading. A stable dark foundation is
+        # more legible than a translucent material whose effective colour changes with the
+        # wallpaper or the macOS light appearance behind it.
+        background = ui_style.SOLID_PALETTE["bg"]
         self._solid_backdrop.layer().setBackgroundColor_(background.CGColor())
         for surface, radius, color, original_border in self._appearance_surfaces:
             layer = surface.layer()
@@ -967,7 +1028,7 @@ class HudController(NSObject):
             NSFontAttributeName: NSFont.systemFontOfSize_(12),
             NSForegroundColorAttributeName: PALETTE["muted"],
         }, NSMakeRange(0, len(text)))
-        title_len = min(len("候选回复"), len(text))
+        title_len = min(len("关系理解"), len(text))
         value.addAttributes_range_({
             NSFontAttributeName: NSFont.boldSystemFontOfSize_(12),
             NSForegroundColorAttributeName: PALETTE["text"],
@@ -992,7 +1053,25 @@ class HudController(NSObject):
         field.setAttributedStringValue_(value)
 
     @objc.python_method
-    def _candidate_text_height(self, field: NSTextField) -> float:
+    def _set_reflection_text(self, field: NSTextField, text: str):
+        """Give the imported Web LOVER sections a quiet, scan-friendly hierarchy."""
+        value = NSMutableAttributedString.alloc().initWithString_(text)
+        value.addAttributes_range_({
+            NSFontAttributeName: NSFont.systemFontOfSize_(13),
+            NSForegroundColorAttributeName: PALETTE["text"],
+        }, NSMakeRange(0, len(text)))
+        for title in ("先给你的感受一点空间", "一起读这段话", "回应前，先做这一小步",
+                      "我注意到的语言线索", "不失去自己，也换一种更柔和的说法"):
+            start = text.find(title)
+            if start >= 0:
+                value.addAttributes_range_({
+                    NSFontAttributeName: NSFont.boldSystemFontOfSize_(13),
+                    NSForegroundColorAttributeName: PALETTE["lavender"],
+                }, NSMakeRange(start, len(title)))
+        field.setAttributedStringValue_(value)
+
+    @objc.python_method
+    def _candidate_text_height(self, field: NSTextField, width: float = CAND_TEXT_W) -> float:
         """Measure the full rendered reply so layout never relies on a character cutoff."""
         text = field.stringValue()
         if not text:
@@ -1002,7 +1081,7 @@ class HudController(NSObject):
         options = (AppKit.NSStringDrawingUsesLineFragmentOrigin
                    | AppKit.NSStringDrawingUsesFontLeading)
         bounds = attributed.boundingRectWithSize_options_(
-            NSMakeSize(CAND_TEXT_W, 10_000), options)
+            NSMakeSize(width, 10_000), options)
         return max(18, float(int(bounds.size.height + 4.999)))
 
     @objc.python_method
@@ -1015,16 +1094,24 @@ class HudController(NSObject):
 
     @objc.python_method
     def _set_risk_scale(self, risk: int | None):
-        selected = None if risk is None else (0 if risk <= 3 else (1 if risk <= 6 else 2))
-        colors = (PALETTE["green"], PALETTE["amber"], PALETTE["red"])
-        for i, dot in enumerate(self._risk_dots):
+        if risk is None:
+            title, color = "评估中", PALETTE["muted"]
+        elif risk <= 3:
+            title, color = "低", PALETTE["green"]
+        elif risk <= 6:
+            title, color = "中", PALETTE["amber"]
+        else:
+            title, color = "高", PALETTE["red"]
+        if hasattr(self, "_tension_value"):
+            self._tension_value.setStringValue_(title)
+            self._tension_value.setTextColor_(color)
+        for dot in self._risk_dots:
             layer = dot.layer()
             layer.removeAnimationForKey_("risk-breathe")
-            alpha = 1.0 if i == selected else 0.68
-            layer.setBackgroundColor_(colors[i].colorWithAlphaComponent_(alpha).CGColor())
+            layer.setBackgroundColor_(color.CGColor())
             layer.setShadowOpacity_(0.0)
-            if i == selected:
-                layer.setShadowColor_(colors[i].CGColor())
+            if risk is not None:
+                layer.setShadowColor_(color.CGColor())
                 layer.setShadowOffset_(NSMakeSize(0, 0))
                 layer.setShadowRadius_(4.0)
                 layer.setShadowOpacity_(0.55)
@@ -1038,6 +1125,16 @@ class HudController(NSObject):
                 pulse.setTimingFunction_(Quartz.CAMediaTimingFunction.functionWithName_(
                     Quartz.kCAMediaTimingFunctionEaseInEaseOut))
                 layer.addAnimation_forKey_(pulse, "risk-breathe")
+
+    @objc.python_method
+    def _set_tension_visible(self, visible: bool):
+        """Show tension only when it belongs to the currently analysed message."""
+        self._tension_visible = visible
+        for view in self._tension_views:
+            # Do not gate this on the panel's transient collapsed state. During an
+            # AppKit relayout that state can lag behind the visible expanded window,
+            # leaving the tension strip permanently hidden after a valid judgement.
+            view.setHidden_(not visible)
 
     @objc.python_method
     def _row_controls(self, slot: int, row: int):
@@ -1062,10 +1159,17 @@ class HudController(NSObject):
                     r = self._rows[slot][row]
                     prob = "排序中" if it["prob"] is None else f"{it['prob'] * 100:.0f}%"
                     self._set_probability_label(r["prob"], row, prob)
-                    r["text"].setStringValue_(it["text"])
+                    if _tone == "关系理解":
+                        self._set_reflection_text(r["text"], it["text"])
+                    else:
+                        r["text"].setStringValue_(it["text"])
                     self._set_progress(slot, row, it["prob"])
                     for c in self._row_controls(slot, row):
                         c.setHidden_(not self._slot_active(slot))
+                    if _tone == "关系理解":
+                        # This is a reflective reading, not a ranked reply to copy/send.
+                        for c in (r["prob"], r["btn"], r["fill_btn"], r["track"], r["fill"]):
+                            c.setHidden_(True)
                     self.cand_texts[slot * styles.PER_TONE + row] = it["text"]
         for slot in range(styles.MAX_SLOTS):
             for row in range(styles.PER_TONE):
@@ -1169,7 +1273,7 @@ class HudController(NSObject):
         pb = NSPasteboard.generalPasteboard()
         pb.clearContents()
         pb.setString_forType_(text, NSPasteboardTypeString)
-        self._render("status", "已复制", PALETTE["green"])
+        self._render("status", "Copied", PALETTE["green"])
 
     def fillCandidate_(self, sender):
         """Write the candidate into the current chat app's input box (via self._app)."""
@@ -1327,12 +1431,12 @@ class HudController(NSObject):
                                           context,
                                           self._stream_hook(t0, "换话术"))
             groups = gen.get("groups") or []
-            failed = [str(g["slot"]) for g in groups if g.get("error")]
+            failed = [f"{g['slot']}: {g['error']}" for g in groups if g.get("error")]
             _log(f"换话术 生成 {gen.get('elapsed_s', 0) * 1000:.0f}ms · {len(groups)} 个话术"
                  + (f" · 失败: {'; '.join(failed)}" if failed else ""))
             payload = self._payload_from_gen(gen)
             if payload is None:
-                err = "服务未返回可用候选，请检查模型设置"
+                err = gen.get("error") or "服务未返回可用候选，请检查模型设置"
                 _log(f"换话术无可用候选: {err}")
                 self._push("applyError:", f"候选生成失败: {err}")
                 return
@@ -1357,7 +1461,7 @@ class HudController(NSObject):
             gen = self.generator.generate(chat_context.model_message(text, context), intent, slot_tones, context)
             payload = self._payload_from_gen(gen)
             if payload is None:
-                err = "服务未返回可用候选，请检查模型设置"
+                err = gen.get("error") or "服务未返回可用候选，请检查模型设置"
                 _log(f"重新生成无可用候选: {err}")
                 self._push("applyError:", f"重新生成失败: {err}")
                 return
@@ -1384,14 +1488,14 @@ class HudController(NSObject):
     @objc.python_method
     def _cand_header(self, payload) -> str:
         pending = any(it["prob"] is None for _s, _t, items in payload for it in items)
-        return "候选回复 · 排序中…" if pending else "候选回复（按合适度排序）"
+        return "关系理解 · 整理中…" if pending else "关系理解卡片"
 
     def applyTones_(self, payload):
         if not self._payload_current(payload):
             return
         self._set_candidate_header(self._cand_header(payload))
         total = sum(len(items) for _s, _t, items in payload)
-        self._render("status", f"已换话术 · {total} 条", PALETTE["muted"])
+        self._render("status", f"Updated · {total} reflection{'s' if total != 1 else ''}", PALETTE["muted"])
         self._render_groups(payload)
 
     def applyRegenerated_(self, payload):
@@ -1400,21 +1504,21 @@ class HudController(NSObject):
         self._set_candidate_header(self._cand_header(payload))
         total = sum(len(items) for _s, _t, items in payload)
         self._render_groups(payload)
-        self._render("status", f"已重新生成 · {total} 条", PALETTE["muted"])
+        self._render("status", f"Regenerated · {total} reflection{'s' if total != 1 else ''}", PALETTE["muted"])
 
     # ------------------------------------------------------------ controls
     def regenerateReply_(self, sender):
         """Regenerate candidates for the current message without re-reading or judging."""
         if self._paused:
-            self._render("status", "已暂停 · 请先继续读屏", PALETTE["amber"])
+            self._render("status", "Paused · resume reading first", PALETTE["amber"])
             return
         if self._app is None:
             # The panel floats over every app: clicked from elsewhere this run would be
             # discarded by _reply_current() with no status update to say so — ask here.
-            self._render("status", "聊天应用不在前台 · 回到聊天窗口再试", PALETTE["amber"])
+            self._render("status", "Chat app is not in front · return to it and try again", PALETTE["amber"])
             return
         if self._regenerating:
-            self._render("status", "推荐回答生成中…", PALETTE["muted"])
+            self._render("status", "Generating reflection…", PALETTE["muted"])
             return
         text = self.analyzed_text
         messages = (self._last_full or {}).get("messages") or []
@@ -1422,15 +1526,15 @@ class HudController(NSObject):
                        if m.side == "them" and m.text == text), None)
         active = [tone for tone in self.slot_tones if tone in styles.PRESETS]
         if not text or newest is None or self._reply_key is None:
-            self._render("status", "当前没有可重新生成的推荐回答", PALETTE["amber"])
+            self._render("status", "There is no reflection to regenerate", PALETTE["amber"])
             return
         if not active:
             self._render("status", "没选话术 · 至少选一个", PALETTE["amber"])
             return
         self._regenerating = True
-        self._set_candidate_header("候选回复 · 重新生成中…")
-        self._render("status", "重新生成推荐回答…", PALETTE["muted"])
-        _log("重新生成推荐回答 · 已请求")
+        self._set_candidate_header("关系理解 · 重新整理中…")
+        self._render("status", "Reflecting on this message again…", PALETTE["muted"])
+        _log("重新理解这段话 · 已请求")
         threading.Thread(target=self._reply_task,
                          args=(self._reply_epoch, self._regenerate_work,
                                text, self._last_intent, list(self.slot_tones)),
@@ -1441,7 +1545,7 @@ class HudController(NSObject):
 
     def togglePause_(self, sender):
         self._paused = not self._paused
-        self.pause_item.setTitle_("继续读屏" if self._paused else "暂停读屏")
+        self.pause_item.setTitle_("Resume reading" if self._paused else "Pause reading")
         if self._paused:
             self._prejudge_req = None        # a paused app judges nothing further
             self._prejudge_result = None
@@ -1449,7 +1553,7 @@ class HudController(NSObject):
             self._pregen_result = None
             if self._ov_panel.isVisible():   # frozen boxes would lie about "realtime"
                 self._ov_panel.orderOut_(None)
-            self._render("status", "已暂停 · 不再读屏", PALETTE["amber"])
+            self._render("status", "Paused · no longer reading", PALETTE["amber"])
             self._render("message", "", PALETTE["text"])
             self._render("sender", "", PALETTE["muted"])
             self._render("intent", "—", PALETTE["muted"])
@@ -1457,14 +1561,14 @@ class HudController(NSObject):
             self._render("risk", "", PALETTE["muted"])
             if hasattr(self, "_risk_dots"):
                 self._set_risk_scale(None)
-            self._render("actions", "", PALETTE["text"])
+            self._set_tension_visible(False)
             self.rows["cand_header"].setStringValue_("")
             self._clear_candidates()
         else:
             self._prejudge_result = None
             self.last_seen = None      # force a fresh read of whatever is on screen
             self.analyzed_text = None
-            self._render("status", "已恢复 · 读屏中", PALETTE["muted"])
+            self._render("status", "Resumed · reading", PALETTE["muted"])
 
     def toggleAlwaysOnTop_(self, sender):
         """Toggle only the HUD's window level; the menu action takes effect immediately."""
@@ -1493,7 +1597,7 @@ class HudController(NSObject):
         self._fingerprint = None
         self._stable_n = 0
         self._next_read_ts = 0
-        self._render("status", "重新分析中…", PALETTE["muted"])
+        self._render("status", "Analyzing again…", PALETTE["muted"])
         if not self._paused and not self._busy:
             self._busy = True
             threading.Thread(target=self._work, daemon=True).start()
@@ -1505,12 +1609,12 @@ class HudController(NSObject):
     def _set_collapsed(self, collapsed: bool):
         """Roll the panel up to a title+status strip, or back to full height."""
         self._collapsed = collapsed
-        controlled = ["message", "sender", "intent", "confidence", "risk", "actions",
-                      "cand_header"]   # "chat" and "status" survive collapsing
+        controlled = ["message", "sender", "cand_header"]   # "chat" and "status" survive collapsing
         for key in controlled:
             self.rows[key].setHidden_(collapsed)
         for view in self._detail_views:
             view.setHidden_(collapsed)
+        self._set_tension_visible(self._tension_visible)
         for slot in range(styles.MAX_SLOTS):
             self._dds[slot].setHidden_(collapsed)
             self._dd_boxes[slot].setHidden_(collapsed)
@@ -2327,6 +2431,9 @@ class HudController(NSObject):
                 # "TYPESAFE_API_KEY" line in half — README promises the hint.
                 _log(f"判断被拒 {type(e).__name__}")
                 self._push("applyError:", str(e))
+                # The optional local model is unavailable, but the current message can
+                # still receive a useful, conservative on-device tension label.
+                self._push("applyTension:", _fallback_tension(newest.text))
             except Exception as e:
                 _log(f"判断失败 {type(e).__name__}")
                 self._push("applyError:", f"判断失败: {type(e).__name__}")
@@ -2356,14 +2463,14 @@ class HudController(NSObject):
         if not self._reply_current():
             return
         groups = gen.get("groups") or []
-        failed = [str(g["slot"]) for g in groups if g.get("error")]
+        failed = [f"{g['slot']}: {g['error']}" for g in groups if g.get("error")]
         _log(f"生成 {gen.get('elapsed_s', 0) * 1000:.0f}ms{note} · {len(groups)} 个话术并发"
              f" → {sum(len(g['texts']) for g in groups)} 条候选"
              + (f" · 失败: {'; '.join(failed)}" if failed else ""))
         intent = verdict["intent"] if verdict else ""
         payload = self._payload_from_gen(gen)
         if payload is None:
-            err = "服务未返回可用候选，请检查模型设置"
+            err = gen.get("error") or "服务未返回可用候选，请检查模型设置"
             _log(f"生成无可用候选: {err}")
             self._push("applyError:", f"候选生成失败: {err}")
             return
@@ -2382,6 +2489,7 @@ class HudController(NSObject):
     @objc.python_method
     def _push(self, selector: str, payload=None):
         if selector in {"applyIncoming:", "applyPending:", "applyJudgment:",
+                        "applyTension:",
                         "applyCandidates:", "applyRegenerated:", "applyTones:",
                         "applyStreamLine:", "applyWaiting:", "applyError:"}:
             epoch = getattr(self._reply_worker, "epoch", self._reply_epoch)
@@ -2426,15 +2534,16 @@ class HudController(NSObject):
         self._last_risk = 0.0
         self._clear_candidates()
         self._stream_rows = {}
-        for key in ("message", "sender", "intent", "confidence", "risk", "actions"):
+        for key in ("message", "sender", "intent", "confidence", "risk"):
             self._render(key, "", PALETTE["muted"])
         if hasattr(self, "_risk_dots"):
             self._set_risk_scale(None)
+        self._set_tension_visible(False)
         if hasattr(self, "_set_candidate_header"):
-            self._set_candidate_header("候选回复")
+            self._set_candidate_header("关系理解卡片")
         else:
             # Lightweight test harnesses load this callback without constructing AppKit.
-            self.rows["cand_header"].setStringValue_("候选回复")
+            self.rows["cand_header"].setStringValue_("关系理解卡片")
         self._render("status", _payload or "等待可确认的对方消息…", PALETTE["muted"])
 
     # --- main-thread callbacks (AppKit is not thread safe)
@@ -2447,19 +2556,23 @@ class HudController(NSObject):
         # keep the previous verdict visible, just badge it
         text, sender, prev = payload
         self._show()
-        self._render("status", "有新消息 · 等消息停稳…", PALETTE["muted"])
+        self._set_tension_visible(False)
+        self._render("status", "New message · waiting for it to settle…", PALETTE["muted"])
         self._render("message", text, PALETTE["muted"])   # grey: not analysed yet
         self._render("sender", self._context_line(sender, prev), PALETTE["muted"])
 
     def applyPending_(self, payload):
         text, sender, prev = payload
         self._show()
-        self._render("status", "分析中…", PALETTE["muted"])
+        # This is now the message being evaluated. Show the scale immediately, even
+        # if the optional local judge is unavailable and cannot select a level yet.
+        self._set_tension_visible(True)
+        self._render("status", "Analyzing…", PALETTE["muted"])
         self._render("message", text, PALETTE["text"])    # inked: this is the one
         self._render("sender", self._context_line(sender, prev), PALETTE["muted"])
         self._clear_candidates()
         self._stream_rows = {}     # a new run starts at line zero in every slot
-        self._set_candidate_header("候选回复 · 等待判断…")
+        self._set_candidate_header("关系理解 · 等待理解…")
 
     def applyJudgment_(self, payload):
         v, sender, prev = payload
@@ -2474,34 +2587,44 @@ class HudController(NSObject):
             # the backend label is "local (Jev-shaped decider-2b)": take what is inside the
             # parens without the paren, or the status line reads "... decider-2b)"
             detail = backend.split("(", 1)[1].rstrip(")")
-            self._render("status", f"本地兜底 · {detail[:26]}", PALETTE["amber"])
+            self._render("status", f"Local fallback · {detail[:26]}", PALETTE["amber"])
         elif backend:
-            self._render("status", f"分析完成 · {backend}", PALETTE["muted"])
+            self._render("status", f"Analysis complete · {backend}", PALETTE["muted"])
         else:
-            self._render("status", "分析完成", PALETTE["muted"])
-        self._render("intent", v["intent"], PALETTE["text"])
-        # the intent recognition rate, read off the judged intent — same muted slot
-        self._render("confidence", f"意图识别率 {v['confidence']:.0%}", PALETTE["muted"])
+            self._render("status", "Analysis complete", PALETTE["muted"])
+        self._render("intent", _intent_display(v["intent"]), PALETTE["text"])
+        # The model's estimated confidence for the displayed interaction signal.
+        self._render("confidence", f"Signal confidence {v['confidence']:.0%}", PALETTE["muted"])
         # Rounded, so the panel does not claim a precision it has: the judge reports a
         # mean like 4.7 out of a 10-level distribution, and "4.7/9" reads as a measurement
         # while "5/9" reads as the estimate it is. Deliberately the mean and not the most
         # likely level — measured on 8 real messages, this model's top level never exceeds
-        # 0.4 and the argmax jumps 1/3/6 across near-identical criticism messages, while the
-        # mean holds (派活 2.0–2.4, 批评 3.0–4.0, 闲聊 1.7).
+        # 0.4 and the argmax can jump between adjacent levels, while the mean is steadier.
         risk = int(round(float(v.get("risk", 0))))
-        label = "安全" if risk <= 3 else ("留神" if risk <= 6 else "危险")
+        label = "Calm" if risk <= 3 else ("Rising" if risk <= 6 else "High tension")
         color = PALETTE["green"] if risk <= 3 else (
             PALETTE["amber"] if risk <= 6 else PALETTE["red"])
-        self._render("risk", f"● {label}  {risk}/9", color)
+        self._render("risk", "", color)
         if hasattr(self, "_risk_dots"):
             self._set_risk_scale(risk)
-        self._render("actions", " · ".join(v.get("actions", [])), PALETTE["text"])
-        self._set_candidate_header("候选回复 · 生成中…")
+        self._set_tension_visible(True)
+        self._set_candidate_header("关系理解 · 整理中…")
         # the verdict landing starts a new candidate run: without this reset, the streamed
         # line counters left over from the previous message would eat every new line
         # (applyStreamLine_ drops rows beyond PER_TONE) — only applyPending_ and
         # toneChanged_ used to reset it, and the pre-judged path goes through neither
         self._stream_rows = {}
+
+    def applyTension_(self, risk):
+        """Show the lightweight local estimate when the full judge cannot run."""
+        try:
+            risk = int(round(float(risk)))
+        except (TypeError, ValueError):
+            return
+        self._last_risk = risk
+        if hasattr(self, "_risk_dots"):
+            self._set_risk_scale(risk)
+        self._set_tension_visible(True)
 
     def applyCandidates_(self, payload):
         if not self._payload_current(payload):
@@ -2580,12 +2703,13 @@ class HudController(NSObject):
         """Hide a global panel without leaving stale conversation state behind."""
         self._last_intent = ""
         self._last_risk = 0.0
+        self._set_tension_visible(False)
         self._stream_rows = {}
         self._chat_title = ""
         self._clear_candidates()
-        for key in ("chat", "message", "sender", "intent", "confidence", "risk", "actions"):
+        for key in ("chat", "message", "sender", "intent", "confidence", "risk"):
             self._render(key, "", PALETTE["muted"])
-        self.rows["cand_header"].setStringValue_("候选回复")
+        self.rows["cand_header"].setStringValue_("关系理解卡片")
         self.applyHidden_(reason)
 
     def applyPosition_(self, win):

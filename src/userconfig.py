@@ -5,14 +5,14 @@ The format is always shell-style `KEY=value`; only the search order varies, beca
 is both a .app and a terminal tool:
 
     1. real environment      wins over everything (good for a one-off override)
-    2. ~/.config/jev-jarvis/env            <- where the README tells you to put your keys
+    2. ~/.config/lover/env                  <- where the README tells you to put your keys
     3. <project>/.env                      <- for working on the repo itself
 
 Both system conventions are searched for that `env` file, since the app is a GUI bundle and
 a CLI tool at once:
 
-    macOS native (GUI apps)   ~/Library/Application Support/jev-jarvis/   <- also holds the venv
-    dev-tool convention       ~/.config/jev-jarvis/   (or $XDG_CONFIG_HOME/jev-jarvis/)
+    macOS native (GUI apps)   ~/Library/Application Support/lover/   <- also holds the venv
+    dev-tool convention       ~/.config/lover/   (or $XDG_CONFIG_HOME/lover/)
 
 One format (`env`), one file to remember. Deliberately not two: a second accepted file with
 the same setting names is how you end up carefully editing the one nothing reads.
@@ -53,9 +53,9 @@ def config_dirs() -> list[Path]:
     xdg = os.environ.get("XDG_CONFIG_HOME")
     dirs = []
     if xdg:
-        dirs.append(Path(xdg) / "jev-jarvis")
-    dirs.append(Path.home() / ".config" / "jev-jarvis")
-    dirs.append(Path.home() / "Library" / "Application Support" / "jev-jarvis")
+        dirs.append(Path(xdg) / "lover")
+    dirs.append(Path.home() / ".config" / "lover")
+    dirs.append(Path.home() / "Library" / "Application Support" / "lover")
     return dirs
 
 
@@ -65,7 +65,7 @@ def env_files() -> list[Path]:
 
 
 # kept for callers that want to name the canonical (dev-tool) location
-CONFIG_DIR = Path.home() / ".config" / "jev-jarvis"
+CONFIG_DIR = Path.home() / ".config" / "lover"
 ENV_FILE = CONFIG_DIR / "env"
 
 
@@ -175,7 +175,7 @@ def get(*names: str) -> str:
 
     A session override wins outright, an empty one included: membership, not
     truthiness. Truthiness let `""` fall through to the real env file, so a
-    developer with JUDGE_BACKEND=local in ~/.config/jev-jarvis/env failed the
+    developer with JUDGE_BACKEND=local in ~/.config/lover/env failed the
     offline tests locally (#133).
     """
     for name in names:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.parse
 from pathlib import Path
 
 import AppKit as A
@@ -98,37 +99,37 @@ class SettingsController(NSObject):
                 value = values.get(f"{prefix}_{name}", default)
                 if name == "API_KEY" and ("$(" in value or "`" in value):
                     value = ""  # Do not evaluate or rewrite shell/keychain expressions.
-                    field.setToolTip_("此密钥由 shell 表达式提供；留空保留原行，输入新密钥才会替换。")
+                    field.setToolTip_("This key comes from a shell expression. Leave it empty to preserve that line.")
                 field.setStringValue_(value)
                 self.style_field(field)
                 field.setDelegate_(self)
                 field.setAccessibilityLabel_(title + " " + label)
                 if name == "API_KEY":
-                    field.setPlaceholderString_("由 shell 表达式提供：留空保留原行，输入新密钥才替换"
+                    field.setPlaceholderString_("Provided by a shell expression; leave empty to preserve it"
                                                if "$(" in values.get(f"{prefix}_{name}", "") or "`" in values.get(f"{prefix}_{name}", "")
-                                               else "仅显示此文件中的密钥；不会复制环境变量中的密钥")
+                                               else "Only this file's key is shown; environment keys are not copied")
                 if name == "MODEL":
                     self.set_models(field, [])
                     field.setCompletes_(False)
-                    field.setPlaceholderString_("获取模型列表后选择，或手动填写模型名称")
+                    field.setPlaceholderString_("Fetch a model list or enter a model name")
                 panel.addSubview_(field)
                 fields[name] = field
                 self.initial[f"{prefix}_{name}"] = value
                 self.controls.append(field)
             self.fields[prefix] = fields
             if prefix == "OPENAI":
-                self.label(panel, "每种话术候选数", 26, 43, 138, 20, 11, PALETTE["text"])
+                self.label(panel, "Reflections per message", 26, 43, 138, 20, 11, PALETTE["text"])
                 self.candidate_count = A.NSPopUpButton.alloc().initWithFrame_pullsDown_(
                     NSMakeRect(170, 39, 78, 28), False)
                 self.candidate_count.addItemsWithTitles_([
                     str(value) for value in range(styles.MIN_PER_TONE, styles.MAX_PER_TONE + 1)])
                 self.candidate_count.selectItemWithTitle_(str(styles.PER_TONE))
-                self.candidate_count.setAccessibilityLabel_("每种话术候选数，1 到 5 条")
-                self.candidate_count.setToolTip_("每种话术生成的候选回复条数；保存后重启生效。")
+                self.candidate_count.setAccessibilityLabel_("Reflections per message, 1 to 5")
+                self.candidate_count.setToolTip_("Number of generated reflections; restart after saving.")
                 self.candidate_count.setTarget_(self)
                 self.candidate_count.setAction_("candidateCountChanged:")
                 panel.addSubview_(self.candidate_count)
-                self.label(panel, "条（保存后重启生效）", 258, 43, 170, 20, 11, PALETTE["muted"])
+                self.label(panel, "(restart after saving)", 258, 43, 170, 20, 11, PALETTE["muted"])
                 self.initial["JEV_CANDIDATES_PER_TONE"] = str(styles.PER_TONE)
                 if userconfig.source_of("JEV_CANDIDATES_PER_TONE") == "环境变量":
                     self.candidate_count.setEnabled_(False)
@@ -162,7 +163,7 @@ class SettingsController(NSObject):
         priority_surface.setFrame_(NSMakeRect(24, 74, 710, 44))
         view.addSubview_(priority_surface)
         self.label(view, "优先级：环境变量 > 用户 env > 项目 .env > 内置；两组生成密钥同时存在时 OpenAI 优先。\n清空此文件的密钥不屏蔽其他来源；切换服务需清除原来源中的优先密钥。", 36, 80, 686, 32, 11, PALETTE["muted"])
-        self.status = self.label(view, "测试会发送固定问候语，不读取聊天内容；可能产生少量服务费用。", 24, 26, 550, 38, 11, PALETTE["muted"])
+        self.status = self.label(view, "A test sends a fixed greeting, not chat content; your provider may charge a small fee.", 24, 26, 550, 38, 11, PALETTE["muted"])
         self.set_status(self.status.stringValue())
         self.save_button = self.button(view, "保存配置", "saveSettings:", 602, 29, 132, True)
         self.controls.append(self.save_button)
@@ -179,9 +180,9 @@ class SettingsController(NSObject):
         group = ui_style.make_surface(10, PALETTE["row"], PALETTE["edge"])
         group.setFrame_(NSMakeRect(12, 168, 666, 120))
         panel.addSubview_(group)
-        title = self.label(panel, "记录聊天历史", 26, 254, 490, 20, 13)
+        title = self.label(panel, "Save conversation history", 26, 254, 490, 20, 13)
         title.setFont_(A.NSFont.boldSystemFontOfSize_(13))
-        self.label(panel, "每个会话保留最近 100 条，关闭后保留已有记录", 26, 235, 530, 18, 11, PALETTE["muted"])
+        self.label(panel, "Keep the latest 100 messages per conversation; existing records remain when turned off", 26, 235, 530, 18, 11, PALETTE["muted"])
         self.history_switch = A.NSSwitch.alloc().initWithFrame_(NSMakeRect(610, 242, 46, 28))
         self.history_switch.setAccessibilityLabel_("记录聊天历史")
         self.history_switch.setTarget_(self)
@@ -192,9 +193,9 @@ class SettingsController(NSObject):
         divider = ui_style.make_surface(0, PALETTE["edge"])
         divider.setFrame_(NSMakeRect(26, 228, 638, 1))
         panel.addSubview_(divider)
-        title = self.label(panel, "模型参考条数", 26, 204, 490, 20, 13)
+        title = self.label(panel, "Messages used as context", 26, 204, 490, 20, 13)
         title.setFont_(A.NSFont.boldSystemFontOfSize_(13))
-        self.label(panel, "使用最近的消息，包含当前消息（1—100 条）", 26, 185, 530, 18, 11, PALETTE["muted"])
+        self.label(panel, "Use recent messages including the current one (1–100)", 26, 185, 530, 18, 11, PALETTE["muted"])
         self.context_count = A.NSTextField.alloc().initWithFrame_(NSMakeRect(580, 194, 56, 28))
         try:
             count = self.hud.context_limit if self.hud else chat_context.message_limit(
@@ -207,14 +208,14 @@ class SettingsController(NSObject):
         self.context_count.setDelegate_(self)
         self.context_count.setAccessibilityLabel_("模型参考条数，1 到 100")
         panel.addSubview_(self.context_count)
-        self.label(panel, "条", 642, 197, 22, 20, 11, PALETTE["muted"])
+        self.label(panel, "messages", 642, 197, 52, 20, 11, PALETTE["muted"])
         self.initial.update({"JEV_HISTORY": "1" if enabled else "0", "JEV_CONTEXT_MESSAGES": str(count)})
         for key, control in (("JEV_HISTORY", self.history_switch),
                              ("JEV_CONTEXT_MESSAGES", self.context_count)):
             if userconfig.source_of(key) == "环境变量":
                 control.setEnabled_(False)
                 control.setToolTip_("由启动环境变量控制；修改环境变量后重启。")
-        title = self.label(panel, "聊天背景", 18, 138, 300, 22, 13)
+        title = self.label(panel, "Conversation context", 18, 138, 300, 22, 13)
         title.setFont_(A.NSFont.boldSystemFontOfSize_(13))
         self.context_picker = A.NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(428, 136, 244, 28), False)
         self.context_picker.setFont_(A.NSFont.systemFontOfSize_(12))
@@ -244,10 +245,10 @@ class SettingsController(NSObject):
         self.background_drafts = {}
         scroll.setDocumentView_(self.background_editor)
         panel.addSubview_(scroll)
-        self.label(panel, "记录在本机保存，推理时发送给所选模型服务。", 18, 5, 500, 18, 10, PALETTE["muted"])
+        self.label(panel, "Records stay on this Mac and are sent to your selected model service for inference.", 18, 5, 500, 18, 10, PALETTE["muted"])
         self.history_menu = A.NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(546, 0, 126, 28), True)
         self.history_menu.setFont_(A.NSFont.systemFontOfSize_(11))
-        self.history_menu.addItemsWithTitles_(["管理记录", "清空所选会话记录", "清空全部记录"])
+        self.history_menu.addItemsWithTitles_(["Manage history", "Clear selected history", "Clear all history"])
         self.history_menu.menu().setAutoenablesItems_(False)
         self.history_menu.setToolTip_("清空立即生效，保留聊天背景。")
         for index, action in enumerate(("clearCurrentHistory:", "clearAllHistory:"), 1):
@@ -592,6 +593,10 @@ class SettingsController(NSObject):
                 extra = json.loads(raw) if raw else {}
                 if not isinstance(extra, dict):
                     raise ValueError("OPENAI_EXTRA_BODY 必须是 JSON 对象。")
+                # OpenAI 官方接口拒绝供应商私有的 enable_thinking 字段；生成时也
+                # 会做同样处理，保证“测试连接”和实际生成的请求一致。
+                if (urllib.parse.urlparse(values["BASE_URL"]).hostname or "").lower() == "api.openai.com":
+                    extra.pop("enable_thinking", None)
         except json.JSONDecodeError:
             self.set_status("OPENAI_EXTRA_BODY 不是有效 JSON，请先修正该配置。", "error")
             return
