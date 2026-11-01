@@ -28,6 +28,18 @@ The hope is simple: fewer conversations that end in regret, and a little more ro
 - Makes room for your own response without asking you to lose your boundaries.
 - Never sends messages automatically.
 
+## In the app
+
+LOVER appears as a floating window beside the conversation you are already having. It keeps the message and its immediate context visible, then offers a compact tension reading and a relationship-understanding card: space for your reaction, a possible reading of the other person’s words, what they may be trying to be heard about, and the language cues behind that reading.
+
+![LOVER floating beside a conversation, showing a relationship-understanding card](docs/lover-interface-conversation.png)
+
+*A warm conversation can still benefit from being read with care: LOVER keeps the original message and its possible emotional meaning side by side.*
+
+![LOVER beside a conversation about a missed call, showing the tension area and relationship-understanding card](docs/lover-interface-reflection.png)
+
+*LOVER is designed to make room for context before a response—without sending, rewriting, or speaking for you.*
+
 ## Chinese-first, language-aware
 
 I am Chinese, and I believe emotional language is often closest and most nuanced in one’s mother tongue. The words we use for care, disappointment, longing, anger, and repair carry cultural and personal meaning that can become flatter in translation.
