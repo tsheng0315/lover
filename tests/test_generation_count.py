@@ -1,4 +1,4 @@
-"""Candidate-count configuration and prompt regressions."""
+"""LOVER's fixed single-card configuration and generation regressions."""
 import sys
 import tempfile
 import unittest
@@ -13,17 +13,17 @@ import styles
 
 
 class CandidateCountConfigTests(unittest.TestCase):
-    def test_settings_persist_candidate_count(self):
+    def test_settings_persist_the_only_supported_candidate_count(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "env"
             updated = settings_config.write_settings(
-                path, "", {"JEV_CANDIDATES_PER_TONE": "4"})
-            self.assertIn("export JEV_CANDIDATES_PER_TONE=4", updated)
+                path, "", {"JEV_CANDIDATES_PER_TONE": "1"})
+            self.assertIn("export JEV_CANDIDATES_PER_TONE=1", updated)
 
-    def test_settings_reject_candidate_count_outside_supported_range(self):
+    def test_settings_reject_any_count_other_than_one(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "env"
-            for value in ("0", "6", "not-a-number"):
+            for value in ("0", "2", "6", "not-a-number"):
                 with self.subTest(value=value), self.assertRaises(ValueError):
                     settings_config.write_settings(
                         path, "", {"JEV_CANDIDATES_PER_TONE": value})
@@ -31,30 +31,19 @@ class CandidateCountConfigTests(unittest.TestCase):
 
 
 class CandidateCountGenerationTests(unittest.TestCase):
-    def test_one_candidate_uses_single_candidate_instructions(self):
+    def test_relationship_card_uses_structured_reflection_prompt(self):
         generator = generate.Generator()
-        with patch.object(styles, "PER_TONE", 1), \
-             patch.object(generator, "_call", return_value="只给一条回复") as call:
-            texts, error = generator._one_tone("当前消息", "闲聊", "高情商话术")
+        response = '{"user_emotion":"有点在意", "surface_message":"对方在说明情况", "language_cues":["没听到"]}'
+        with patch.object(generator, "_call", return_value=response) as call:
+            texts, error = generator._one_tone("当前消息", "日常互动", "关系理解")
 
-        self.assertEqual((texts, error), (["只给一条回复"], ""))
+        self.assertEqual(error, "")
+        self.assertEqual(len(texts), 1)
+        self.assertIn("先给你的感受一点空间\n有点在意", texts[0])
+        self.assertIn("我注意到的语言线索\n• 没听到", texts[0])
         prompt = call.call_args.args[0]
-        self.assertIn("请写 1 条回复候选", prompt)
-        self.assertIn("只写一条稳妥", prompt)
-        self.assertNotIn("前一条稳妥", prompt)
-
-    def test_multiple_candidates_are_limited_to_configured_count(self):
-        generator = generate.Generator()
-        response = "第一条\n第二条\n第三条\n第四条"
-        with patch.object(styles, "PER_TONE", 3), \
-             patch.object(generator, "_call", return_value=response) as call:
-            texts, error = generator._one_tone("当前消息", "闲聊", "高情商话术")
-
-        self.assertEqual((texts, error), (["第一条", "第二条", "第三条"], ""))
-        prompt = call.call_args.args[0]
-        self.assertIn("请写 3 条回复候选", prompt)
-        self.assertIn("只输出 3 行", prompt)
-        self.assertIn("前一条稳妥", prompt)
+        self.assertIn("Return one JSON object", prompt)
+        self.assertIn("Write every value in Simplified Chinese", prompt)
 
 
 if __name__ == "__main__":

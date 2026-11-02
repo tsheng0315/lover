@@ -36,7 +36,11 @@ class CaptureRecoveryTests(unittest.TestCase):
                 shutil.copyfile(source_png, output)
                 return True
 
-            with patch.object(perception, "capture_window", side_effect=fake_capture):
+            # This regression is about materialising the temporary PNG.  Do not consult
+            # a real window ID: CI and local desktops need not have window 123, and that
+            # metadata lookup is unrelated to the file-lifetime contract under test.
+            with patch.object(perception, "capture_window", side_effect=fake_capture), \
+                 patch.object(perception, "_window_point_size", return_value=None):
                 image = perception.capture_image(123)
 
         self.assertIsNotNone(image)

@@ -1431,13 +1431,13 @@ class HudController(NSObject):
                                           context,
                                           self._stream_hook(t0, "换话术"))
             groups = gen.get("groups") or []
-            failed = [f"{g['slot']}: {g['error']}" for g in groups if g.get("error")]
+            failed = [str(g["slot"]) for g in groups if g.get("error")]
             _log(f"换话术 生成 {gen.get('elapsed_s', 0) * 1000:.0f}ms · {len(groups)} 个话术"
                  + (f" · 失败: {'; '.join(failed)}" if failed else ""))
             payload = self._payload_from_gen(gen)
             if payload is None:
-                err = gen.get("error") or "服务未返回可用候选，请检查模型设置"
-                _log(f"换话术无可用候选: {err}")
+                err = "服务未返回可用候选，请检查模型设置"
+                _log("换话术无可用候选")
                 self._push("applyError:", f"候选生成失败: {err}")
                 return
             # streamed endpoints already showed the lines; this push only matters for the
@@ -1461,8 +1461,8 @@ class HudController(NSObject):
             gen = self.generator.generate(chat_context.model_message(text, context), intent, slot_tones, context)
             payload = self._payload_from_gen(gen)
             if payload is None:
-                err = gen.get("error") or "服务未返回可用候选，请检查模型设置"
-                _log(f"重新生成无可用候选: {err}")
+                err = "服务未返回可用候选，请检查模型设置"
+                _log("重新生成无可用候选")
                 self._push("applyError:", f"重新生成失败: {err}")
                 return
             ranked = self._rank_payload(payload, text, intent)
@@ -2463,15 +2463,15 @@ class HudController(NSObject):
         if not self._reply_current():
             return
         groups = gen.get("groups") or []
-        failed = [f"{g['slot']}: {g['error']}" for g in groups if g.get("error")]
+        failed = [str(g["slot"]) for g in groups if g.get("error")]
         _log(f"生成 {gen.get('elapsed_s', 0) * 1000:.0f}ms{note} · {len(groups)} 个话术并发"
              f" → {sum(len(g['texts']) for g in groups)} 条候选"
              + (f" · 失败: {'; '.join(failed)}" if failed else ""))
         intent = verdict["intent"] if verdict else ""
         payload = self._payload_from_gen(gen)
         if payload is None:
-            err = gen.get("error") or "服务未返回可用候选，请检查模型设置"
-            _log(f"生成无可用候选: {err}")
+            err = "服务未返回可用候选，请检查模型设置"
+            _log("生成无可用候选")
             self._push("applyError:", f"候选生成失败: {err}")
             return
         if intent:

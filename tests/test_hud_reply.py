@@ -59,6 +59,7 @@ class HudReplyTests(unittest.TestCase):
             _gen_epoch=0, _last_skip_reason=None, _prejudge_req=None, _prejudge_result=None,
             _pregen_req=None, _pregen_result=None, _pregen_running=False,
             _prejudging=False, _paused=False, _analyzing=False, _regenerating=False,
+            _tension_views=[], _tension_visible=False,
             _stable_n=0, last_change_ts=0, last_analyze_ts=0,
             _app=None, _asked_accessibility=False, _foreground_epoch=0,
             _read_fail_since=None, _read_fail_hidden=False, _empty_frame_since=None,
@@ -532,7 +533,7 @@ class HudReplyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             home = root / 'home'
-            expected = home / 'Library/Application Support/jev-jarvis/conversations.json'
+            expected = home / 'Library/Application Support/lover/conversations.json'
             with patch.object(Path, 'home', return_value=home):
                 self.h.conversations = chat_context.Conversations()
                 self.assertEqual(self.h.conversations.path, expected)
