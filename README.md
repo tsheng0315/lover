@@ -2,7 +2,7 @@
 
 > Don’t forget love.
 
-LOVER is a Chinese-first macOS companion for taking a breath before responding in an intimate conversation.
+LOVER is a macOS companion for taking a breath before responding in an intimate conversation.
 
 ## Why I built LOVER
 
@@ -103,12 +103,6 @@ You can also configure compatible Anthropic endpoints or local models. See [`.en
 LOVER is an experimental personal project. It currently focuses on intimate-relationship communication and Chinese-first interaction design. Its interpretations can be wrong, especially without enough context—please treat them as invitations to reflect, not facts.
 
 Thoughtful feedback, bug reports, and contributions are welcome.
-
-## Origin and acknowledgements
-
-LOVER is adapted from [jev-chat/jev-chat-jarvis](https://github.com/jev-chat/jev-chat-jarvis). It has been reshaped into a relationship-focused macOS reflection tool.
-
-Please see [NOTICE](NOTICE) for required attribution notices.
 
 ## License
 
